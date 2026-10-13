@@ -17,8 +17,10 @@ defineProps<{
           {{ title }}
         </slot>
       </h1>
-      <p v-if="description" class="mt-2 text-muted">
-        {{ description }}
+      <p v-if="description || $slots.description" class="mt-2 text-muted">
+        <slot name="description">
+          {{ description }}
+        </slot>
       </p>
     </div>
     <div v-if="$slots.right" class="shrink-0 text-sm text-muted tabular-nums">

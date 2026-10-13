@@ -1,3 +1,5 @@
+import type { Circuit } from '#shared/types/f1'
+
 const COUNTRY_NAMES_FR: Record<string, string> = {
   'Abu Dhabi': 'Abou Dabi',
   'Argentina': 'Argentine',
@@ -84,4 +86,9 @@ export function raceName(name: string) {
 
 export function teamColor(constructorId: string) {
   return TEAM_COLORS[constructorId] ?? '#71717A'
+}
+
+/** Lien Google Maps pointant sur les coordonnées GPS du circuit. */
+export function circuitMapsUrl(circuit: Circuit) {
+  return `https://www.google.com/maps/search/?api=1&query=${circuit.lat},${circuit.lng}`
 }

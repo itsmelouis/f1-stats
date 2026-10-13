@@ -80,8 +80,15 @@ useSeoMeta({
     <PageHeader
       :eyebrow="eyebrow"
       :title="raceName(race.name)"
-      :description="`${race.circuit.name}, ${race.circuit.locality} — ${countryName(race.circuit.country)}`"
     >
+      <template #description>
+        <a
+          :href="circuitMapsUrl(race.circuit)"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="underline decoration-(--ui-border-accented) underline-offset-4 hover:text-highlighted hover:decoration-current"
+        >{{ race.circuit.name }}, {{ race.circuit.locality }}</a> — {{ countryName(race.circuit.country) }}
+      </template>
       <template #right>
         <template v-if="isPast">
           Course disputée le {{ formatDate(race.at, { day: 'numeric', month: 'long' }) }}
