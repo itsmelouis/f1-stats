@@ -10,6 +10,8 @@
     "build": "nuxt build",
     "dev": "nuxt dev",
     "preview": "nuxt preview",
+    "cf:preview": "nuxt build && wrangler dev",
+    "deploy": "nuxt build && wrangler deploy",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -28,6 +30,7 @@
     "eslint": "^10.12.0",
     "eslint-plugin-better-tailwindcss": "^4.9.0",
     "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.13"
+    "vue-tsc": "^3.3.13",
+    "wrangler": "^4.150.0"
   }
 }

@@ -1,0 +1,20 @@
+// Config Cloudflare Workers. `main` et `assets` sont ajoutés par Nitro au build
+// (preset cloudflare_module + cloudflare.deployConfig) dans .output/server/wrangler.json.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "f1-stats",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "f1.itslouis.dev", "custom_domain": true }
+  ],
+  // Cache Nitro (calendrier, classements, résultats, tracés) : la mémoire d'un Worker
+  // ne survit pas entre deux requêtes, on persiste dans KV.
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "972b261f92824429b5fbc93aef2f613e" }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

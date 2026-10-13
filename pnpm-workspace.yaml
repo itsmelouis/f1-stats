@@ -1,4 +1,8 @@
 minimumReleaseAgeExcludePrune: true
+minimumReleaseAgeExclude:
+  - miniflare@5.20261006.2-beta
+  - wrangler@4.150.0
+
 trustPolicy: no-downgrade
 # Les paquets publiés il y a plus d'un an (525 600 min) ne sont pas soumis au contrôle :
 # beaucoup prédatent le trusted publishing (ex. semver@6) sans être suspects.
@@ -49,3 +53,5 @@ allowBuilds:
   esbuild: false
   unrs-resolver: false
   vue-demi: false
+  # moteur local de wrangler : son postinstall télécharge le binaire
+  workerd: true
