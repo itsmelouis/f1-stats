@@ -1,0 +1,51 @@
+minimumReleaseAgeExcludePrune: true
+trustPolicy: no-downgrade
+# Les paquets publiés il y a plus d'un an (525 600 min) ne sont pas soumis au contrôle :
+# beaucoup prédatent le trusted publishing (ex. semver@6) sans être suspects.
+trustPolicyIgnoreAfter: 525600
+
+# pnpm 12 refuse par défaut les versions dont la publication n'est plus « trusted »
+# (trustPolicy: no-downgrade). La famille cssnano 9.x (dépendance de Nuxt) a
+# abandonné le trusted publishing : on l'exclut explicitement de ce contrôle,
+# tout le reste de l'arbre reste vérifié.
+trustPolicyExclude:
+  - cssnano
+  - cssnano-preset-default
+  - cssnano-utils
+  - stylehacks
+  - postcss-calc
+  - postcss-colormin
+  - postcss-convert-values
+  - postcss-discard-comments
+  - postcss-discard-duplicates
+  - postcss-discard-empty
+  - postcss-discard-overridden
+  - postcss-merge-longhand
+  - postcss-merge-rules
+  - postcss-minify-font-values
+  - postcss-minify-gradients
+  - postcss-minify-params
+  - postcss-minify-selectors
+  - postcss-normalize-charset
+  - postcss-normalize-display-values
+  - postcss-normalize-positions
+  - postcss-normalize-repeat-style
+  - postcss-normalize-string
+  - postcss-normalize-timing-functions
+  - postcss-normalize-unicode
+  - postcss-normalize-url
+  - postcss-normalize-whitespace
+  - postcss-ordered-values
+  - postcss-reduce-initial
+  - postcss-reduce-transforms
+  - postcss-svgo
+  - postcss-unique-selectors
+
+shellEmulator: true
+
+allowBuilds:
+  '@parcel/watcher': false
+  '@tailwindcss/oxide': false
+  esbuild: false
+  unrs-resolver: false
+  vue-demi: false

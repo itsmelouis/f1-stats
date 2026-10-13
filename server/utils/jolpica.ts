@@ -1,0 +1,370 @@
+import type {
+  Constructor,
+  ConstructorStanding,
+  Driver,
+  DriverStanding,
+  QualifyingResult,
+  Race,
+  RaceDetail,
+  RaceLink,
+  Schedule,
+  Session,
+  SessionKey,
+  SessionResult,
+  Standings,
+} from '#shared/types/f1'
+
+/**
+ * Client Jolpica F1 (successeur d'Ergast) : https://api.jolpi.ca
+ * Gratuit, sans clé, limité à ~500 req/h — d'où le cache Nitro sur chaque appel.
+ */
+const BASE_URL = 'https://api.jolpi.ca/ergast/f1'
+
+// --- Types bruts de l'API (sous-ensemble utilisé) ---
+
+interface RawSession {
+  date: string
+  time?: string
+}
+
+interface RawDriver {
+  driverId: string
+  permanentNumber?: string
+  code?: string
+  givenName: string
+  familyName: string
+  nationality: string
+}
+
+interface RawConstructor {
+  constructorId: string
+  name: string
+  nationality: string
+}
+
+interface RawResult {
+  position: string
+  positionText: string
+  points: string
+  grid: string
+  laps: string
+  status: string
+  Driver: RawDriver
+  Constructor: RawConstructor
+  Time?: { millis?: string, time: string }
+  FastestLap?: { rank?: string, lap?: string, Time?: { time: string } }
+}
+
+interface RawQualifyingResult {
+  position: string
+  Driver: RawDriver
+  Constructor: RawConstructor
+  Q1?: string
+  Q2?: string
+  Q3?: string
+}
+
+interface RawRace extends RawSession {
+  season: string
+  round: string
+  url: string
+  raceName: string
+  Circuit: {
+    circuitId: string
+    url: string
+    circuitName: string
+    Location: { lat: string, long: string, locality: string, country: string }
+  }
+  FirstPractice?: RawSession
+  SecondPractice?: RawSession
+  ThirdPractice?: RawSession
+  SprintQualifying?: RawSession
+  SprintShootout?: RawSession
+  Sprint?: RawSession
+  Qualifying?: RawSession
+  Results?: RawResult[]
+  SprintResults?: RawResult[]
+  QualifyingResults?: RawQualifyingResult[]
+}
+
+interface RawRaceTable {
+  RaceTable: { season: string, Races: RawRace[] }
+}
+
+interface RawStandingsTable<T> {
+  StandingsTable: {
+    season: string
+    round: string
+    StandingsLists: T[]
+  }
+}
+
+interface RawDriverStandingsList {
+  season: string
+  round: string
+  DriverStandings: {
+    position: string
+    points: string
+    wins: string
+    Driver: RawDriver
+    Constructors: RawConstructor[]
+  }[]
+}
+
+interface RawConstructorStandingsList {
+  season: string
+  round: string
+  ConstructorStandings: {
+    position: string
+    points: string
+    wins: string
+    Constructor: RawConstructor
+  }[]
+}
+
+async function jolpica<T>(path: string): Promise<T> {
+  const data = await $fetch<{ MRData: T }>(`${BASE_URL}/${path}.json`, {
+    query: { limit: 100 },
+  })
+  return data.MRData
+}
+
+// --- Normalisation ---
+
+const SESSION_LABELS: Record<SessionKey, string> = {
+  fp1: 'Essais libres 1',
+  fp2: 'Essais libres 2',
+  fp3: 'Essais libres 3',
+  sprintQualifying: 'Qualifications sprint',
+  sprint: 'Sprint',
+  qualifying: 'Qualifications',
+  race: 'Course',
+}
+
+function toIso(session: RawSession): { at: string, hasTime: boolean } {
+  return {
+    at: `${session.date}T${session.time ?? '00:00:00Z'}`,
+    hasTime: Boolean(session.time),
+  }
+}
+
+function toSession(key: SessionKey, raw?: RawSession): Session | null {
+  if (!raw)
+    return null
+  return { key, label: SESSION_LABELS[key], ...toIso(raw) }
+}
+
+function toRace(raw: RawRace): Race {
+  const sessions = [
+    toSession('fp1', raw.FirstPractice),
+    toSession('fp2', raw.SecondPractice),
+    toSession('fp3', raw.ThirdPractice),
+    toSession('sprintQualifying', raw.SprintQualifying ?? raw.SprintShootout),
+    toSession('sprint', raw.Sprint),
+    toSession('qualifying', raw.Qualifying),
+    toSession('race', raw),
+  ]
+    .filter((s): s is Session => s !== null)
+    .sort((a, b) => a.at.localeCompare(b.at))
+
+  return {
+    season: raw.season,
+    round: Number(raw.round),
+    name: raw.raceName,
+    url: raw.url,
+    circuit: {
+      id: raw.Circuit.circuitId,
+      name: raw.Circuit.circuitName,
+      locality: raw.Circuit.Location.locality,
+      country: raw.Circuit.Location.country,
+      url: raw.Circuit.url,
+      lat: Number(raw.Circuit.Location.lat),
+      lng: Number(raw.Circuit.Location.long),
+    },
+    at: toIso(raw).at,
+    hasSprint: Boolean(raw.Sprint),
+    sessions,
+  }
+}
+
+function toDriver(raw: RawDriver): Driver {
+  return {
+    id: raw.driverId,
+    code: raw.code ?? raw.familyName.slice(0, 3).toUpperCase(),
+    number: raw.permanentNumber ?? '',
+    firstName: raw.givenName,
+    lastName: raw.familyName,
+    nationality: raw.nationality,
+  }
+}
+
+function toConstructor(raw: RawConstructor): Constructor {
+  return { id: raw.constructorId, name: raw.name, nationality: raw.nationality }
+}
+
+function toSessionResult(raw: RawResult): SessionResult {
+  const position = Number(raw.position)
+  const fastestLap = raw.FastestLap?.Time?.time
+    ? {
+        rank: Number(raw.FastestLap.rank ?? 0),
+        lap: Number(raw.FastestLap.lap ?? 0),
+        time: raw.FastestLap.Time.time,
+      }
+    : null
+
+  return {
+    position: Number.isFinite(position) ? position : null,
+    positionText: raw.positionText,
+    points: Number(raw.points),
+    driver: toDriver(raw.Driver),
+    constructor: toConstructor(raw.Constructor),
+    grid: Number(raw.grid),
+    laps: Number(raw.laps),
+    status: raw.status,
+    time: raw.Time?.time || null,
+    fastestLap,
+  }
+}
+
+function toQualifyingResult(raw: RawQualifyingResult): QualifyingResult {
+  return {
+    position: Number(raw.position),
+    driver: toDriver(raw.Driver),
+    constructor: toConstructor(raw.Constructor),
+    q1: raw.Q1 || null,
+    q2: raw.Q2 || null,
+    q3: raw.Q3 || null,
+  }
+}
+
+// --- Accès aux données, avec cache ---
+
+const CACHE_GROUP = 'jolpica'
+
+export const getSchedule = defineCachedFunction(async (): Promise<Schedule> => {
+  const data = await jolpica<RawRaceTable>('current')
+  return {
+    season: data.RaceTable.season,
+    races: data.RaceTable.Races.map(toRace),
+  }
+}, {
+  group: CACHE_GROUP,
+  name: 'schedule',
+  getKey: () => 'current',
+  maxAge: 60 * 60,
+  swr: true,
+})
+
+/**
+ * Podiums de la saison par pilote et par écurie. Jolpica n'expose pas ce compteur,
+ * mais on peut filtrer les résultats des Grands Prix par position d'arrivée (1, 2, 3).
+ */
+const getPodiums = defineCachedFunction(async () => {
+  const podiums = { drivers: {} as Record<string, number>, constructors: {} as Record<string, number> }
+  const tables = await Promise.all([1, 2, 3].map(position => jolpica<RawRaceTable>(`current/results/${position}`)))
+  for (const table of tables) {
+    for (const race of table.RaceTable.Races) {
+      for (const result of race.Results ?? []) {
+        podiums.drivers[result.Driver.driverId] = (podiums.drivers[result.Driver.driverId] ?? 0) + 1
+        podiums.constructors[result.Constructor.constructorId] = (podiums.constructors[result.Constructor.constructorId] ?? 0) + 1
+      }
+    }
+  }
+  return podiums
+}, {
+  group: CACHE_GROUP,
+  name: 'podiums',
+  getKey: () => 'current',
+  maxAge: 60 * 10,
+  swr: true,
+})
+
+export const getDriverStandings = defineCachedFunction(async (): Promise<Standings<DriverStanding>> => {
+  const [data, podiums] = await Promise.all([
+    jolpica<RawStandingsTable<RawDriverStandingsList>>('current/driverstandings'),
+    getPodiums(),
+  ])
+  const list = data.StandingsTable.StandingsLists[0]
+  return {
+    season: data.StandingsTable.season,
+    round: Number(data.StandingsTable.round),
+    items: (list?.DriverStandings ?? []).map(s => ({
+      position: Number(s.position),
+      points: Number(s.points),
+      wins: Number(s.wins),
+      podiums: podiums.drivers[s.Driver.driverId] ?? 0,
+      driver: toDriver(s.Driver),
+      // Jolpica liste les écuries dans l'ordre chronologique : la dernière est l'actuelle
+      constructor: toConstructor(s.Constructors[s.Constructors.length - 1]!),
+    })),
+  }
+}, {
+  group: CACHE_GROUP,
+  name: 'driver-standings',
+  getKey: () => 'current',
+  maxAge: 60 * 10,
+  swr: true,
+})
+
+export const getConstructorStandings = defineCachedFunction(async (): Promise<Standings<ConstructorStanding>> => {
+  const [data, podiums] = await Promise.all([
+    jolpica<RawStandingsTable<RawConstructorStandingsList>>('current/constructorstandings'),
+    getPodiums(),
+  ])
+  const list = data.StandingsTable.StandingsLists[0]
+  return {
+    season: data.StandingsTable.season,
+    round: Number(data.StandingsTable.round),
+    items: (list?.ConstructorStandings ?? []).map(s => ({
+      position: Number(s.position),
+      points: Number(s.points),
+      wins: Number(s.wins),
+      podiums: podiums.constructors[s.Constructor.constructorId] ?? 0,
+      constructor: toConstructor(s.Constructor),
+    })),
+  }
+}, {
+  group: CACHE_GROUP,
+  name: 'constructor-standings',
+  getKey: () => 'current',
+  maxAge: 60 * 10,
+  swr: true,
+})
+
+export const getRaceDetail = defineCachedFunction(async (round: number): Promise<RaceDetail | null> => {
+  const schedule = await getSchedule()
+  const index = schedule.races.findIndex(r => r.round === round)
+  const race = schedule.races[index]
+  if (!race)
+    return null
+
+  const toLink = (r?: Race): RaceLink | null => r ? { round: r.round, name: r.name } : null
+
+  const prefix = `${race.season}/${race.round}`
+  const [results, qualifying, sprint, circuitMap] = await Promise.all([
+    jolpica<RawRaceTable>(`${prefix}/results`),
+    jolpica<RawRaceTable>(`${prefix}/qualifying`),
+    race.hasSprint ? jolpica<RawRaceTable>(`${prefix}/sprint`) : null,
+    getCircuitMap(race.circuit),
+  ])
+
+  const resultsRaw = results.RaceTable.Races[0]?.Results
+  const qualifyingRaw = qualifying.RaceTable.Races[0]?.QualifyingResults
+  const sprintRaw = sprint?.RaceTable.Races[0]?.SprintResults
+
+  return {
+    race,
+    previous: toLink(schedule.races[index - 1]),
+    next: toLink(schedule.races[index + 1]),
+    circuitMap,
+    results: resultsRaw?.length ? resultsRaw.map(toSessionResult) : null,
+    qualifying: qualifyingRaw?.length ? qualifyingRaw.map(toQualifyingResult) : null,
+    sprint: sprintRaw?.length ? sprintRaw.map(toSessionResult) : null,
+  }
+}, {
+  group: CACHE_GROUP,
+  name: 'race-detail',
+  getKey: (round: number) => String(round),
+  maxAge: 60 * 10,
+  swr: true,
+})
