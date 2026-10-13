@@ -84,6 +84,11 @@ export interface Standings<T> {
   items: T[]
 }
 
+export interface SeasonStandings {
+  drivers: Standings<DriverStanding>
+  constructors: Standings<ConstructorStanding>
+}
+
 export interface FastestLap {
   rank: number
   lap: number

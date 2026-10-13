@@ -1,17 +1,15 @@
 import type {
   Constructor,
-  ConstructorStanding,
   Driver,
-  DriverStanding,
   QualifyingResult,
   Race,
   RaceDetail,
   RaceLink,
   Schedule,
+  SeasonStandings,
   Session,
   SessionKey,
   SessionResult,
-  Standings,
 } from '#shared/types/f1'
 
 /**
@@ -122,11 +120,45 @@ interface RawConstructorStandingsList {
   }[]
 }
 
-async function jolpica<T>(path: string): Promise<T> {
-  const data = await $fetch<{ MRData: T }>(`${BASE_URL}/${path}.json`, {
-    query: { limit: 100 },
-  })
-  return data.MRData
+/**
+ * Jolpica tolère ~4 requêtes/s par IP, et en production les IP sortantes du Worker
+ * sont partagées : on limite la concurrence et on réessaie sur 429 avec un délai.
+ */
+const MAX_CONCURRENT = 2
+const MAX_RETRIES = 3
+let inFlight = 0
+const waiting: (() => void)[] = []
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (inFlight >= MAX_CONCURRENT)
+    await new Promise<void>(resolve => waiting.push(resolve))
+  inFlight++
+  try {
+    return await fn()
+  }
+  finally {
+    inFlight--
+    waiting.shift()?.()
+  }
+}
+
+async function jolpica<T>(path: string, attempt = 0): Promise<T> {
+  try {
+    const data = await withSlot(() => $fetch<{ MRData: T }>(`${BASE_URL}/${path}.json`, {
+      query: { limit: 100 },
+      retry: 0,
+    }))
+    return data.MRData
+  }
+  catch (error) {
+    const { statusCode, response } = error as { statusCode?: number, response?: Response }
+    const retryable = statusCode === 429 || (statusCode !== undefined && statusCode >= 500)
+    if (!retryable || attempt >= MAX_RETRIES)
+      throw error
+    const retryAfter = Number(response?.headers.get('retry-after')) || 0
+    await new Promise(resolve => setTimeout(resolve, retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt))
+    return jolpica<T>(path, attempt + 1)
+  }
 }
 
 // --- Normalisation ---
@@ -279,53 +311,48 @@ const getPodiums = defineCachedFunction(async () => {
   swr: true,
 })
 
-export const getDriverStandings = defineCachedFunction(async (): Promise<Standings<DriverStanding>> => {
-  const [data, podiums] = await Promise.all([
+/**
+ * Classements pilotes et constructeurs en un seul appel : tout passe par le même
+ * limiteur de concurrence, ce qui évite de dépasser le burst de Jolpica quand la
+ * page Classements se charge.
+ */
+export const getStandings = defineCachedFunction(async (): Promise<SeasonStandings> => {
+  const [drivers, constructors, podiums] = await Promise.all([
     jolpica<RawStandingsTable<RawDriverStandingsList>>('current/driverstandings'),
-    getPodiums(),
-  ])
-  const list = data.StandingsTable.StandingsLists[0]
-  return {
-    season: data.StandingsTable.season,
-    round: Number(data.StandingsTable.round),
-    items: (list?.DriverStandings ?? []).map(s => ({
-      position: Number(s.position),
-      points: Number(s.points),
-      wins: Number(s.wins),
-      podiums: podiums.drivers[s.Driver.driverId] ?? 0,
-      driver: toDriver(s.Driver),
-      // Jolpica liste les écuries dans l'ordre chronologique : la dernière est l'actuelle
-      constructor: toConstructor(s.Constructors[s.Constructors.length - 1]!),
-    })),
-  }
-}, {
-  group: CACHE_GROUP,
-  name: 'driver-standings',
-  getKey: () => 'current',
-  maxAge: 60 * 10,
-  swr: true,
-})
-
-export const getConstructorStandings = defineCachedFunction(async (): Promise<Standings<ConstructorStanding>> => {
-  const [data, podiums] = await Promise.all([
     jolpica<RawStandingsTable<RawConstructorStandingsList>>('current/constructorstandings'),
     getPodiums(),
   ])
-  const list = data.StandingsTable.StandingsLists[0]
+  const driverList = drivers.StandingsTable.StandingsLists[0]
+  const constructorList = constructors.StandingsTable.StandingsLists[0]
   return {
-    season: data.StandingsTable.season,
-    round: Number(data.StandingsTable.round),
-    items: (list?.ConstructorStandings ?? []).map(s => ({
-      position: Number(s.position),
-      points: Number(s.points),
-      wins: Number(s.wins),
-      podiums: podiums.constructors[s.Constructor.constructorId] ?? 0,
-      constructor: toConstructor(s.Constructor),
-    })),
+    drivers: {
+      season: drivers.StandingsTable.season,
+      round: Number(drivers.StandingsTable.round),
+      items: (driverList?.DriverStandings ?? []).map(s => ({
+        position: Number(s.position),
+        points: Number(s.points),
+        wins: Number(s.wins),
+        podiums: podiums.drivers[s.Driver.driverId] ?? 0,
+        driver: toDriver(s.Driver),
+        // Jolpica liste les écuries dans l'ordre chronologique : la dernière est l'actuelle
+        constructor: toConstructor(s.Constructors[s.Constructors.length - 1]!),
+      })),
+    },
+    constructors: {
+      season: constructors.StandingsTable.season,
+      round: Number(constructors.StandingsTable.round),
+      items: (constructorList?.ConstructorStandings ?? []).map(s => ({
+        position: Number(s.position),
+        points: Number(s.points),
+        wins: Number(s.wins),
+        podiums: podiums.constructors[s.Constructor.constructorId] ?? 0,
+        constructor: toConstructor(s.Constructor),
+      })),
+    },
   }
 }, {
   group: CACHE_GROUP,
-  name: 'constructor-standings',
+  name: 'standings',
   getKey: () => 'current',
   maxAge: 60 * 10,
   swr: true,

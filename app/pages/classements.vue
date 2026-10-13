@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { TabsItem } from '@nuxt/ui'
 
-const [{ data: drivers, error: driversError }, { data: constructors, error: constructorsError }] = await Promise.all([
-  useFetch('/api/standings/drivers'),
-  useFetch('/api/standings/constructors'),
-])
+const { data: standings, error } = await useFetch('/api/standings')
 
-if (driversError.value || constructorsError.value) {
+if (error.value || !standings.value) {
   throw createError({ statusCode: 502, message: 'Impossible de charger les classements', fatal: true })
 }
+
+const drivers = computed(() => standings.value!.drivers)
+const constructors = computed(() => standings.value!.constructors)
 
 const tabs: TabsItem[] = [
   { label: 'Pilotes', value: 'drivers', slot: 'drivers' },
@@ -22,18 +22,18 @@ useSeoMeta({
 
 <template>
   <UContainer class="py-10">
-    <PageHeader :eyebrow="`Saison ${drivers?.season}`" title="Classements">
+    <PageHeader :eyebrow="`Saison ${drivers.season}`" title="Classements">
       <template #right>
-        Après {{ drivers?.round }} manche{{ (drivers?.round ?? 0) > 1 ? 's' : '' }}
+        Après {{ drivers.round }} manche{{ drivers.round > 1 ? 's' : '' }}
       </template>
     </PageHeader>
 
     <UTabs :items="tabs" variant="link" color="neutral" default-value="drivers" :unmount-on-hide="false">
       <template #drivers>
-        <DriverStandingsTable v-if="drivers" :items="drivers.items" class="mt-6" />
+        <DriverStandingsTable :items="drivers.items" class="mt-6" />
       </template>
       <template #constructors>
-        <ConstructorStandingsTable v-if="constructors" :items="constructors.items" class="mt-6" />
+        <ConstructorStandingsTable :items="constructors.items" class="mt-6" />
       </template>
     </UTabs>
   </UContainer>

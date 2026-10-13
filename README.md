@@ -6,7 +6,7 @@ Nuxt 4 · Nuxt UI 4 · Tailwind CSS 4 · données [Jolpica F1](https://api.jolpi
 ## Pages
 
 - `/` — calendrier de la saison, prochaine course épinglée avec le compte à rebours et les horaires de chaque séance
-- `/classements` — championnats pilotes et constructeurs
+- `/classements` — championnats pilotes et constructeurs (victoires, podiums, points, écart)
 - `/courses/:round` — détail d'une manche : course, qualifications et sprint (temps, écarts, points), tracé du circuit (clic pour agrandir), navigation manche précédente / suivante (flèches ← →)
 
 Toutes les heures sont affichées en heure de Paris. Thème clair et sombre (suit le système, bascule dans l'en-tête).
@@ -41,7 +41,7 @@ app/
   pages/        index (calendrier), classements, courses/[round]
   utils/        formatage des dates (fr-FR, Europe/Paris), libellés, drapeaux, couleurs d'écurie
 server/
-  api/          routes Nitro consommées par le front (`/api/schedule`, `/api/standings/*`, `/api/races/:round`)
+  api/          routes Nitro consommées par le front (`/api/schedule`, `/api/standings`, `/api/races/:round`)
   utils/        client Jolpica (appels, normalisation, cache) et tracés des circuits (GeoJSON → chemin SVG)
 shared/
   types/        types partagés entre le serveur et le front
