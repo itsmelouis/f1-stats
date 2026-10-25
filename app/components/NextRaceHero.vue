@@ -16,7 +16,12 @@ defineProps<{
         {{ raceName(race.name) }}
       </h2>
       <p class="mt-2 text-muted">
-        {{ race.circuit.name }}, {{ race.circuit.locality }} — {{ countryName(race.circuit.country) }}
+        <a
+          :href="circuitMapsUrl(race.circuit)"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="underline decoration-(--ui-border-accented) underline-offset-4 hover:text-highlighted hover:decoration-current"
+        >{{ race.circuit.name }}, {{ race.circuit.locality }}</a> — {{ countryName(race.circuit.country) }}
       </p>
 
       <dl class="mt-8 flex flex-wrap gap-x-12 gap-y-4">
