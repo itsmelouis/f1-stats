@@ -11,6 +11,7 @@ import type {
   SessionKey,
   SessionResult,
 } from '#shared/types/f1'
+import type { Roster } from './openf1'
 
 /**
  * Client Jolpica F1 (successeur d'Ergast) : https://api.jolpi.ca
@@ -358,6 +359,42 @@ export const getStandings = defineCachedFunction(async (): Promise<SeasonStandin
   swr: true,
 })
 
+/**
+ * Complète avec OpenF1 les sessions terminées que Jolpica n'a pas encore publiées
+ * (souvent les qualifs et la course du week-end en cours).
+ */
+async function withOpenF1Fallback(detail: RaceDetail): Promise<RaceDetail> {
+  const { race } = detail
+  const started = (key: SessionKey) => race.sessions.some(s => s.key === key && Date.parse(s.at) < Date.now())
+  const missing = {
+    results: !detail.results && started('race'),
+    qualifying: !detail.qualifying && started('qualifying'),
+    sprint: race.hasSprint && !detail.sprint && started('sprint'),
+  }
+  if (!missing.results && !missing.qualifying && !missing.sprint)
+    return detail
+
+  try {
+    // Les pilotes de la dernière course publiée, pour retrouver ids et écuries Jolpica
+    const last = await jolpica<RawRaceTable>(`${race.season}/last/results`)
+    const roster: Roster = new Map((last.RaceTable.Races[0]?.Results ?? []).map((r) => {
+      const driver = toDriver(r.Driver)
+      return [driver.code, { driver, constructor: toConstructor(r.Constructor) }]
+    }))
+    // En séquence, pour rester sous la limite de débit d'OpenF1
+    return {
+      ...detail,
+      qualifying: (missing.qualifying && await getOpenF1Qualifying(race, roster)) || detail.qualifying,
+      sprint: (missing.sprint && await getOpenF1SessionResults(race, 'sprint', roster)) || detail.sprint,
+      results: (missing.results && await getOpenF1SessionResults(race, 'race', roster)) || detail.results,
+    }
+  }
+  catch {
+    // Le secours est un bonus : une erreur d'OpenF1 ne doit pas casser la page
+    return detail
+  }
+}
+
 export const getRaceDetail = defineCachedFunction(async (round: number): Promise<RaceDetail | null> => {
   const schedule = await getSchedule()
   const index = schedule.races.findIndex(r => r.round === round)
@@ -379,7 +416,7 @@ export const getRaceDetail = defineCachedFunction(async (round: number): Promise
   const qualifyingRaw = qualifying.RaceTable.Races[0]?.QualifyingResults
   const sprintRaw = sprint?.RaceTable.Races[0]?.SprintResults
 
-  return {
+  const detail: RaceDetail = {
     race,
     previous: toLink(schedule.races[index - 1]),
     next: toLink(schedule.races[index + 1]),
@@ -388,6 +425,7 @@ export const getRaceDetail = defineCachedFunction(async (round: number): Promise
     qualifying: qualifyingRaw?.length ? qualifyingRaw.map(toQualifyingResult) : null,
     sprint: sprintRaw?.length ? sprintRaw.map(toSessionResult) : null,
   }
+  return withOpenF1Fallback(detail)
 }, {
   group: CACHE_GROUP,
   name: 'race-detail',
