@@ -379,13 +379,12 @@ async function withOpenF1Fallback(event: H3Event, detail: RaceDetail): Promise<R
   if (!missing.results && !missing.qualifying && !missing.sprint)
     return detail
 
+  // Les pilotes du classement, pour retrouver ids et écuries Jolpica. Le classement est
+  // servi depuis le cache même périmé, ce qui évite un appel Jolpica de plus (et un 429)
+  const standings = await getStandings(event).catch(() => null)
+  const roster: Roster = new Map((standings?.drivers.items ?? []).map(({ driver, constructor }) => [driver.code, { driver, constructor }]))
+
   try {
-    // Les pilotes de la dernière course publiée, pour retrouver ids et écuries Jolpica
-    const last = await jolpica<RawRaceTable>(`${race.season}/last/results`)
-    const roster: Roster = new Map((last.RaceTable.Races[0]?.Results ?? []).map((r) => {
-      const driver = toDriver(r.Driver)
-      return [driver.code, { driver, constructor: toConstructor(r.Constructor) }]
-    }))
     // En séquence, pour rester sous la limite de débit d'OpenF1
     return {
       ...detail,
@@ -394,8 +393,9 @@ async function withOpenF1Fallback(event: H3Event, detail: RaceDetail): Promise<R
       results: (missing.results && await getOpenF1SessionResults(event, race, 'race', roster)) || detail.results,
     }
   }
-  catch {
+  catch (error) {
     // Le secours est un bonus : une erreur d'OpenF1 ne doit pas casser la page
+    console.error('[openf1]', error)
     return detail
   }
 }
