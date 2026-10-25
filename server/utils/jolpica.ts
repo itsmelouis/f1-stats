@@ -1,3 +1,4 @@
+import type { H3Event } from 'h3'
 import type {
   Constructor,
   Driver,
@@ -272,9 +273,13 @@ function toQualifyingResult(raw: RawQualifyingResult): QualifyingResult {
 
 // --- Accès aux données, avec cache ---
 
+// Les fonctions en cache prennent l'event en premier argument : c'est ce qui permet à
+// Nitro de rafraîchir une entrée périmée via `event.waitUntil`. Sans lui, le Worker
+// coupe le rafraîchissement dès la réponse envoyée et l'entrée périmée est servie à vie.
+
 const CACHE_GROUP = 'jolpica'
 
-export const getSchedule = defineCachedFunction(async (): Promise<Schedule> => {
+export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise<Schedule> => {
   const data = await jolpica<RawRaceTable>('current')
   return {
     season: data.RaceTable.season,
@@ -292,7 +297,7 @@ export const getSchedule = defineCachedFunction(async (): Promise<Schedule> => {
  * Podiums de la saison par pilote et par écurie. Jolpica n'expose pas ce compteur,
  * mais on peut filtrer les résultats des Grands Prix par position d'arrivée (1, 2, 3).
  */
-const getPodiums = defineCachedFunction(async () => {
+const getPodiums = defineCachedFunction(async (_event: H3Event) => {
   const podiums = { drivers: {} as Record<string, number>, constructors: {} as Record<string, number> }
   const tables = await Promise.all([1, 2, 3].map(position => jolpica<RawRaceTable>(`current/results/${position}`)))
   for (const table of tables) {
@@ -317,11 +322,11 @@ const getPodiums = defineCachedFunction(async () => {
  * limiteur de concurrence, ce qui évite de dépasser le burst de Jolpica quand la
  * page Classements se charge.
  */
-export const getStandings = defineCachedFunction(async (): Promise<SeasonStandings> => {
+export const getStandings = defineCachedFunction(async (event: H3Event): Promise<SeasonStandings> => {
   const [drivers, constructors, podiums] = await Promise.all([
     jolpica<RawStandingsTable<RawDriverStandingsList>>('current/driverstandings'),
     jolpica<RawStandingsTable<RawConstructorStandingsList>>('current/constructorstandings'),
-    getPodiums(),
+    getPodiums(event),
   ])
   const driverList = drivers.StandingsTable.StandingsLists[0]
   const constructorList = constructors.StandingsTable.StandingsLists[0]
@@ -363,7 +368,7 @@ export const getStandings = defineCachedFunction(async (): Promise<SeasonStandin
  * Complète avec OpenF1 les sessions terminées que Jolpica n'a pas encore publiées
  * (souvent les qualifs et la course du week-end en cours).
  */
-async function withOpenF1Fallback(detail: RaceDetail): Promise<RaceDetail> {
+async function withOpenF1Fallback(event: H3Event, detail: RaceDetail): Promise<RaceDetail> {
   const { race } = detail
   const started = (key: SessionKey) => race.sessions.some(s => s.key === key && Date.parse(s.at) < Date.now())
   const missing = {
@@ -384,9 +389,9 @@ async function withOpenF1Fallback(detail: RaceDetail): Promise<RaceDetail> {
     // En séquence, pour rester sous la limite de débit d'OpenF1
     return {
       ...detail,
-      qualifying: (missing.qualifying && await getOpenF1Qualifying(race, roster)) || detail.qualifying,
-      sprint: (missing.sprint && await getOpenF1SessionResults(race, 'sprint', roster)) || detail.sprint,
-      results: (missing.results && await getOpenF1SessionResults(race, 'race', roster)) || detail.results,
+      qualifying: (missing.qualifying && await getOpenF1Qualifying(event, race, roster)) || detail.qualifying,
+      sprint: (missing.sprint && await getOpenF1SessionResults(event, race, 'sprint', roster)) || detail.sprint,
+      results: (missing.results && await getOpenF1SessionResults(event, race, 'race', roster)) || detail.results,
     }
   }
   catch {
@@ -395,8 +400,8 @@ async function withOpenF1Fallback(detail: RaceDetail): Promise<RaceDetail> {
   }
 }
 
-export const getRaceDetail = defineCachedFunction(async (round: number): Promise<RaceDetail | null> => {
-  const schedule = await getSchedule()
+export const getRaceDetail = defineCachedFunction(async (event: H3Event, round: number): Promise<RaceDetail | null> => {
+  const schedule = await getSchedule(event)
   const index = schedule.races.findIndex(r => r.round === round)
   const race = schedule.races[index]
   if (!race)
@@ -409,7 +414,7 @@ export const getRaceDetail = defineCachedFunction(async (round: number): Promise
     jolpica<RawRaceTable>(`${prefix}/results`),
     jolpica<RawRaceTable>(`${prefix}/qualifying`),
     race.hasSprint ? jolpica<RawRaceTable>(`${prefix}/sprint`) : null,
-    getCircuitMap(race.circuit),
+    getCircuitMap(event, race.circuit),
   ])
 
   const resultsRaw = results.RaceTable.Races[0]?.Results
@@ -425,11 +430,11 @@ export const getRaceDetail = defineCachedFunction(async (round: number): Promise
     qualifying: qualifyingRaw?.length ? qualifyingRaw.map(toQualifyingResult) : null,
     sprint: sprintRaw?.length ? sprintRaw.map(toSessionResult) : null,
   }
-  return withOpenF1Fallback(detail)
+  return withOpenF1Fallback(event, detail)
 }, {
   group: CACHE_GROUP,
   name: 'race-detail',
-  getKey: (round: number) => String(round),
+  getKey: (_event: H3Event, round: number) => String(round),
   maxAge: 60 * 10,
   swr: true,
 })

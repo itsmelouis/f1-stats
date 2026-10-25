@@ -1,3 +1,4 @@
+import type { H3Event } from 'h3'
 import type { Circuit, CircuitMap } from '#shared/types/f1'
 
 /**
@@ -65,12 +66,12 @@ function fetchJson<T>(path: string) {
 }
 
 const getLocations = defineCachedFunction(
-  () => fetchJson<CircuitLocation[]>('f1-locations.json'),
+  (_event: H3Event) => fetchJson<CircuitLocation[]>('f1-locations.json'),
   { group: 'circuits', name: 'locations', getKey: () => 'all', maxAge: 60 * 60 * 24 * 30, swr: true },
 )
 
-async function fetchCircuitMap(circuit: Circuit): Promise<CircuitMap | null> {
-  const locations = await getLocations()
+async function fetchCircuitMap(event: H3Event, circuit: Circuit): Promise<CircuitMap | null> {
+  const locations = await getLocations(event)
   const nearest = locations
     .map(location => ({ location, km: distanceKm(circuit.lat, circuit.lng, location.lat, location.lon) }))
     .sort((a, b) => a.km - b.km)[0]
@@ -89,9 +90,9 @@ async function fetchCircuitMap(circuit: Circuit): Promise<CircuitMap | null> {
   }
 }
 
-export const getCircuitMap = defineCachedFunction(async (circuit: Circuit): Promise<CircuitMap | null> => {
+export const getCircuitMap = defineCachedFunction(async (event: H3Event, circuit: Circuit): Promise<CircuitMap | null> => {
   try {
-    return await fetchCircuitMap(circuit)
+    return await fetchCircuitMap(event, circuit)
   }
   catch {
     // Le tracé est un bonus : une erreur réseau ne doit pas casser la page
@@ -100,7 +101,7 @@ export const getCircuitMap = defineCachedFunction(async (circuit: Circuit): Prom
 }, {
   group: 'circuits',
   name: 'map',
-  getKey: (circuit: Circuit) => circuit.id,
+  getKey: (_event: H3Event, circuit: Circuit) => circuit.id,
   maxAge: 60 * 60 * 24 * 30,
   swr: true,
 })

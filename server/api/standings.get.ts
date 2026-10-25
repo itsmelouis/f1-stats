@@ -1,1 +1,1 @@
-export default defineEventHandler(() => getStandings())
+export default defineEventHandler(event => getStandings(event))

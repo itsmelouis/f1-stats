@@ -1,3 +1,4 @@
+import type { H3Event } from 'h3'
 import type { Constructor, Driver, QualifyingResult, Race, SessionResult } from '#shared/types/f1'
 
 /**
@@ -58,8 +59,8 @@ async function openf1<T>(path: string, query: Record<string, string | number>): 
 }
 
 const getSessions = defineCachedFunction(
-  (year: string) => openf1<RawSession>('sessions', { year }),
-  { group: 'openf1', name: 'sessions', getKey: (year: string) => year, maxAge: 60 * 60, swr: true },
+  (_event: H3Event, year: string) => openf1<RawSession>('sessions', { year }),
+  { group: 'openf1', name: 'sessions', getKey: (_event: H3Event, year: string) => year, maxAge: 60 * 60, swr: true },
 )
 
 // --- Normalisation ---
@@ -131,11 +132,11 @@ const SESSION_NAMES = { sprint: 'Sprint', qualifying: 'Qualifying', race: 'Race'
 const LIVE_DELAY = 30 * 60 * 1000
 
 /** Résultats bruts d'une session terminée du week-end, `null` si OpenF1 ne l'a pas. */
-async function fetchSession(race: Race, key: keyof typeof SESSION_NAMES) {
+async function fetchSession(event: H3Event, race: Race, key: keyof typeof SESSION_NAMES) {
   const at = race.sessions.find(s => s.key === key)?.at
   if (!at)
     return null
-  const sessions = await getSessions(race.season)
+  const sessions = await getSessions(event, race.season)
   // Même horaire de départ des deux côtés ; on tolère un léger écart
   const session = sessions.find(s => s.session_name === SESSION_NAMES[key]
     && Math.abs(Date.parse(s.date_start) - Date.parse(at)) < 60 * 60 * 1000)
@@ -151,8 +152,8 @@ async function fetchSession(race: Race, key: keyof typeof SESSION_NAMES) {
   return { results, driverOf: (raw: RawResult) => byNumber.get(raw.driver_number) }
 }
 
-export async function getOpenF1SessionResults(race: Race, key: 'sprint' | 'race', roster: Roster): Promise<SessionResult[] | null> {
-  const session = await fetchSession(race, key)
+export async function getOpenF1SessionResults(event: H3Event, race: Race, key: 'sprint' | 'race', roster: Roster): Promise<SessionResult[] | null> {
+  const session = await fetchSession(event, race, key)
   if (!session)
     return null
   return session.results.map((raw) => {
@@ -174,8 +175,8 @@ export async function getOpenF1SessionResults(race: Race, key: 'sprint' | 'race'
   })
 }
 
-export async function getOpenF1Qualifying(race: Race, roster: Roster): Promise<QualifyingResult[] | null> {
-  const session = await fetchSession(race, 'qualifying')
+export async function getOpenF1Qualifying(event: H3Event, race: Race, roster: Roster): Promise<QualifyingResult[] | null> {
+  const session = await fetchSession(event, race, 'qualifying')
   if (!session)
     return null
   return session.results.map((raw, index) => {

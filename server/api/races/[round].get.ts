@@ -4,7 +4,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Numéro de manche invalide' })
   }
 
-  const detail = await getRaceDetail(round)
+  const detail = await getRaceDetail(event, round)
   if (!detail) {
     throw createError({ statusCode: 404, message: 'Manche introuvable' })
   }

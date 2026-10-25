@@ -1,1 +1,1 @@
-export default defineEventHandler(() => getSchedule())
+export default defineEventHandler(event => getSchedule(event))
