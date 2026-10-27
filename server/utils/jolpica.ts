@@ -400,7 +400,7 @@ async function withOpenF1Fallback(event: H3Event, detail: RaceDetail): Promise<R
   }
 }
 
-export const getRaceDetail = defineCachedFunction(async (event: H3Event, round: number): Promise<RaceDetail | null> => {
+async function fetchRaceDetail(event: H3Event, round: number): Promise<RaceDetail | null> {
   const schedule = await getSchedule(event)
   const index = schedule.races.findIndex(r => r.round === round)
   const race = schedule.races[index]
@@ -431,10 +431,37 @@ export const getRaceDetail = defineCachedFunction(async (event: H3Event, round: 
     sprint: sprintRaw?.length ? sprintRaw.map(toSessionResult) : null,
   }
   return withOpenF1Fallback(event, detail)
-}, {
+}
+
+/**
+ * Passé ce délai après le départ de la course, les résultats ne bougent plus
+ * (pénalités et réclamations sont tranchées) : on ne les redemande presque plus à Jolpica.
+ */
+const SETTLED_AFTER = 3 * 24 * 60 * 60 * 1000
+
+const getLiveRaceDetail = defineCachedFunction(fetchRaceDetail, {
   group: CACHE_GROUP,
   name: 'race-detail',
   getKey: (_event: H3Event, round: number) => String(round),
   maxAge: 60 * 10,
   swr: true,
 })
+
+const getSettledRaceDetail = defineCachedFunction(fetchRaceDetail, {
+  group: CACHE_GROUP,
+  name: 'race-detail-settled',
+  getKey: (_event: H3Event, round: number) => String(round),
+  maxAge: 60 * 60 * 24 * 30,
+  swr: true,
+})
+
+export async function getRaceDetail(event: H3Event, round: number): Promise<RaceDetail | null> {
+  const schedule = await getSchedule(event)
+  const race = schedule.races.find(r => r.round === round)
+  if (!race || Date.now() - Date.parse(race.at) < SETTLED_AFTER)
+    return getLiveRaceDetail(event, round)
+
+  // Au passage en « réglée », l'entrée est encore vide : si Jolpica refuse,
+  // on se rabat sur l'entrée de la période live, servie même périmée
+  return getSettledRaceDetail(event, round).catch(() => getLiveRaceDetail(event, round))
+}
