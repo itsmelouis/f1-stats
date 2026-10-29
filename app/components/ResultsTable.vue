@@ -6,6 +6,13 @@ const props = defineProps<{
 }>()
 
 const winner = computed(() => props.results.find(r => r.position === 1))
+
+/** Places gagnées (positif) ou perdues (négatif) depuis la grille ; `null` si départ des stands, grille inconnue ou non classé */
+function positionsGained(result: SessionResult) {
+  if (!result.grid || !isClassified(result))
+    return null
+  return result.grid - result.position!
+}
 </script>
 
 <template>
@@ -46,7 +53,21 @@ const winner = computed(() => props.results.find(r => r.position === 1))
             {{ result.constructor.name }}
           </td>
           <td class="f1-num hidden text-muted sm:table-cell">
-            {{ result.grid || '–' }}
+            {{ result.grid || '–' }}<span
+              class="inline-flex w-10 items-center justify-end gap-0.5 text-xs"
+              :class="{
+                'text-green-600 dark:text-green-400': (positionsGained(result) ?? 0) > 0,
+                'text-f1red-600 dark:text-f1red-400': (positionsGained(result) ?? 0) < 0,
+              }"
+            >
+              <template v-if="positionsGained(result)">
+                <UIcon
+                  :name="positionsGained(result)! > 0 ? 'i-lucide-arrow-up' : 'i-lucide-arrow-down'"
+                  class="size-3"
+                  :aria-label="positionsGained(result)! > 0 ? 'places gagnées' : 'places perdues'"
+                />{{ Math.abs(positionsGained(result)!) }}
+              </template>
+            </span>
           </td>
           <td class="f1-num hidden text-muted sm:table-cell">
             {{ result.laps }}
