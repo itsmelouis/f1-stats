@@ -32,6 +32,10 @@ export function formatPoints(points: number) {
   return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(points)
 }
 
+export function formatPercent(value: number) {
+  return `${new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)}\u202F%`
+}
+
 const STATUS_LABELS: Record<string, string> = {
   'Retired': 'Abandon',
   'Disqualified': 'Disqualifié',

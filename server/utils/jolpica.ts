@@ -429,8 +429,13 @@ async function fetchRaceDetail(event: H3Event, round: number): Promise<RaceDetai
     results: resultsRaw?.length ? resultsRaw.map(toSessionResult) : null,
     qualifying: qualifyingRaw?.length ? qualifyingRaw.map(toQualifyingResult) : null,
     sprint: sprintRaw?.length ? sprintRaw.map(toSessionResult) : null,
+    driverOfTheDay: null,
   }
-  return withOpenF1Fallback(event, detail)
+  const full = await withOpenF1Fallback(event, detail)
+  return {
+    ...full,
+    driverOfTheDay: full.results ? await getDriverOfTheDay(event, race, full.results) : null,
+  }
 }
 
 /**

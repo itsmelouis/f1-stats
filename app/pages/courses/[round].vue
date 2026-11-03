@@ -130,6 +130,8 @@ useSeoMeta({
 
         <FastestLaps v-if="detail?.results" :results="detail.results" />
 
+        <DriverOfTheDay v-if="detail?.driverOfTheDay" :votes="detail.driverOfTheDay" />
+
         <div>
           <h2 class="mb-3 text-sm font-medium text-muted">
             Programme du week-end

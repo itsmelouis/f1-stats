@@ -118,6 +118,14 @@ export interface QualifyingResult {
   q3: string | null
 }
 
+/** Une ligne du vote des fans « Pilote du jour » (formula1.com) */
+export interface DriverOfTheDayVote {
+  driver: Driver
+  constructor: Constructor
+  /** Part des votes, en pourcentage */
+  percentage: number
+}
+
 /** Manche voisine dans le calendrier, pour la navigation précédente / suivante */
 export type RaceLink = Pick<Race, 'round' | 'name'>
 
@@ -142,4 +150,6 @@ export interface RaceDetail {
   results: SessionResult[] | null
   sprint: SessionResult[] | null
   qualifying: QualifyingResult[] | null
+  /** Top du vote « Pilote du jour », `null` tant que le vote n'est pas publié */
+  driverOfTheDay: DriverOfTheDayVote[] | null
 }

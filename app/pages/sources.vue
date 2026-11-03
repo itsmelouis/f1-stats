@@ -25,6 +25,12 @@ const sources: Source[] = [
     usage: 'Tracés des circuits, issus d\'OpenStreetMap, redessinés en SVG.',
     license: { label: 'MIT', url: 'https://github.com/bacinger/f1-circuits/blob/master/LICENSE.md' },
   },
+  {
+    name: 'TracingInsights/DOTD',
+    url: 'https://github.com/TracingInsights/DOTD',
+    usage: 'Résultats du vote des fans « Pilote du jour », relevés sur formula1.com après chaque Grand Prix (mis à jour le lundi).',
+    license: { label: 'Apache 2.0', url: 'https://github.com/TracingInsights/DOTD/blob/main/LICENSE' },
+  },
 ]
 
 useSeoMeta({
