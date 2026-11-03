@@ -94,3 +94,20 @@ export function resultTimeLabel(result: SessionResult, winner: SessionResult | u
 export function isClassified(result: SessionResult) {
   return result.position !== null && /^\d+$/.test(result.positionText)
 }
+
+/** Convertit un temps au tour « 1:23.456 » (ou « 83.456 ») en millisecondes ; `null` si illisible. */
+export function lapTimeToMillis(time: string) {
+  const match = time.trim().match(/^(?:(\d+):)?(\d+)\.(\d{1,3})$/)
+  if (!match)
+    return null
+  const [, minutes = '0', seconds, fraction] = match
+  return (Number(minutes) * 60 + Number(seconds)) * 1000 + Number(fraction!.padEnd(3, '0'))
+}
+
+/** Écart en millisecondes formaté comme à la télévision : « +0.312 », « +1:02.045 ». */
+export function formatGap(millis: number) {
+  const minutes = Math.floor(millis / 60_000)
+  const seconds = (millis % 60_000) / 1000
+  const secondsLabel = minutes > 0 ? seconds.toFixed(3).padStart(6, '0') : seconds.toFixed(3)
+  return `+${minutes > 0 ? `${minutes}:` : ''}${secondsLabel}`
+}

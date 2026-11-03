@@ -128,6 +128,8 @@ useSeoMeta({
       <aside class="space-y-10 lg:order-2">
         <CircuitMap v-if="detail?.circuitMap" :map="detail.circuitMap" :name="race.circuit.name" />
 
+        <FastestLaps v-if="detail?.results" :results="detail.results" />
+
         <div>
           <h2 class="mb-3 text-sm font-medium text-muted">
             Programme du week-end
