@@ -279,6 +279,13 @@ function toQualifyingResult(raw: RawQualifyingResult): QualifyingResult {
 
 const CACHE_GROUP = 'jolpica'
 
+/**
+ * Au-delà d'une heure sans rafraîchissement, une entrée n'est plus servie périmée :
+ * la requête attend Jolpica. Sans ce plafond, le premier visiteur après une période
+ * creuse voyait le classement de la manche précédente (voir `freshWithin`).
+ */
+const MAX_STALE = 60 * 60 * 1000
+
 export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise<Schedule> => {
   const data = await jolpica<RawRaceTable>('current')
   return {
@@ -291,13 +298,14 @@ export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise
   getKey: () => 'current',
   maxAge: 60 * 60,
   swr: true,
+  validate: freshWithin(MAX_STALE),
 })
 
 /**
  * Podiums de la saison par pilote et par écurie. Jolpica n'expose pas ce compteur,
  * mais on peut filtrer les résultats des Grands Prix par position d'arrivée (1, 2, 3).
  */
-const getPodiums = defineCachedFunction(async (_event: H3Event) => {
+async function fetchPodiums() {
   const podiums = { drivers: {} as Record<string, number>, constructors: {} as Record<string, number> }
   const tables = await Promise.all([1, 2, 3].map(position => jolpica<RawRaceTable>(`current/results/${position}`)))
   for (const table of tables) {
@@ -309,24 +317,19 @@ const getPodiums = defineCachedFunction(async (_event: H3Event) => {
     }
   }
   return podiums
-}, {
-  group: CACHE_GROUP,
-  name: 'podiums',
-  getKey: () => 'current',
-  maxAge: 60 * 10,
-  swr: true,
-})
+}
 
 /**
  * Classements pilotes et constructeurs en un seul appel : tout passe par le même
  * limiteur de concurrence, ce qui évite de dépasser le burst de Jolpica quand la
- * page Classements se charge.
+ * page Classements se charge. Les podiums sont comptés dans le même appel (et non
+ * dans un cache à part) pour qu'ils soient toujours de la même manche que les points.
  */
-export const getStandings = defineCachedFunction(async (event: H3Event): Promise<SeasonStandings> => {
+export const getStandings = defineCachedFunction(async (_event: H3Event): Promise<SeasonStandings> => {
   const [drivers, constructors, podiums] = await Promise.all([
     jolpica<RawStandingsTable<RawDriverStandingsList>>('current/driverstandings'),
     jolpica<RawStandingsTable<RawConstructorStandingsList>>('current/constructorstandings'),
-    getPodiums(event),
+    fetchPodiums(),
   ])
   const driverList = drivers.StandingsTable.StandingsLists[0]
   const constructorList = constructors.StandingsTable.StandingsLists[0]
@@ -362,6 +365,7 @@ export const getStandings = defineCachedFunction(async (event: H3Event): Promise
   getKey: () => 'current',
   maxAge: 60 * 10,
   swr: true,
+  validate: freshWithin(MAX_STALE),
 })
 
 /**
@@ -450,6 +454,7 @@ const getLiveRaceDetail = defineCachedFunction(fetchRaceDetail, {
   getKey: (_event: H3Event, round: number) => String(round),
   maxAge: 60 * 10,
   swr: true,
+  validate: freshWithin(MAX_STALE),
 })
 
 const getSettledRaceDetail = defineCachedFunction(fetchRaceDetail, {
