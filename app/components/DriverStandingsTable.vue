@@ -43,7 +43,9 @@ const leaderPoints = computed(() => props.items[0]?.points ?? 0)
             <DriverName :driver="item.driver" :constructor="item.constructor" />
           </td>
           <td class="hidden text-muted md:table-cell">
-            {{ item.constructor.name }}
+            <NuxtLink :to="`/ecuries/${item.constructor.id}`" class="hover:text-highlighted">
+              {{ item.constructor.name }}
+            </NuxtLink>
           </td>
           <td class="f1-num hidden sm:table-cell" :class="item.wins ? 'text-muted' : 'text-dimmed'">
             {{ item.wins }}

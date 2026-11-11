@@ -115,3 +115,12 @@ export function formatGap(millis: number) {
   const secondsLabel = minutes > 0 ? seconds.toFixed(3).padStart(6, '0') : seconds.toFixed(3)
   return `+${minutes > 0 ? `${minutes}:` : ''}${secondsLabel}`
 }
+
+/** Rang en toutes lettres courtes : « 1er », « 2e ». */
+export function formatRank(position: number) {
+  return position === 1 ? '1er' : `${position}e`
+}
+
+export function statusLabel(status: string) {
+  return STATUS_LABELS[status] ?? status
+}

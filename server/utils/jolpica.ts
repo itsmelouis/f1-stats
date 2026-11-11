@@ -27,22 +27,25 @@ interface RawSession {
   time?: string
 }
 
-interface RawDriver {
+export interface RawDriver {
   driverId: string
   permanentNumber?: string
   code?: string
   givenName: string
   familyName: string
+  dateOfBirth?: string
   nationality: string
+  url?: string
 }
 
-interface RawConstructor {
+export interface RawConstructor {
   constructorId: string
   name: string
   nationality: string
+  url?: string
 }
 
-interface RawResult {
+export interface RawResult {
   position: string
   positionText: string
   points: string
@@ -64,7 +67,7 @@ interface RawQualifyingResult {
   Q3?: string
 }
 
-interface RawRace extends RawSession {
+export interface RawRace extends RawSession {
   season: string
   round: string
   url: string
@@ -87,11 +90,11 @@ interface RawRace extends RawSession {
   QualifyingResults?: RawQualifyingResult[]
 }
 
-interface RawRaceTable {
+export interface RawRaceTable {
   RaceTable: { season: string, Races: RawRace[] }
 }
 
-interface RawStandingsTable<T> {
+export interface RawStandingsTable<T> {
   StandingsTable: {
     season: string
     round: string
@@ -99,7 +102,7 @@ interface RawStandingsTable<T> {
   }
 }
 
-interface RawDriverStandingsList {
+export interface RawDriverStandingsList {
   season: string
   round: string
   DriverStandings: {
@@ -111,7 +114,7 @@ interface RawDriverStandingsList {
   }[]
 }
 
-interface RawConstructorStandingsList {
+export interface RawConstructorStandingsList {
   season: string
   round: string
   ConstructorStandings: {
@@ -144,10 +147,13 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function jolpica<T>(path: string, attempt = 0): Promise<T> {
+/** Jolpica renvoie au plus 100 lignes par page */
+const PAGE_SIZE = 100
+
+export async function jolpica<T>(path: string, query: { limit?: number, offset?: number } = {}, attempt = 0): Promise<T> {
   try {
     const data = await withSlot(() => $fetch<{ MRData: T }>(`${BASE_URL}/${path}.json`, {
-      query: { limit: 100 },
+      query: { limit: PAGE_SIZE, ...query },
       retry: 0,
     }))
     return data.MRData
@@ -159,8 +165,46 @@ async function jolpica<T>(path: string, attempt = 0): Promise<T> {
       throw error
     const retryAfter = Number(response?.headers.get('retry-after')) || 0
     await new Promise(resolve => setTimeout(resolve, retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt))
-    return jolpica<T>(path, attempt + 1)
+    return jolpica<T>(path, query, attempt + 1)
   }
+}
+
+interface RawPage {
+  total: string
+}
+
+/** Nombre de lignes d'une liste, sans la télécharger. */
+export async function jolpicaCount(path: string): Promise<number> {
+  const page = await jolpica<RawPage>(path, { limit: 1 })
+  return Number(page.total)
+}
+
+/**
+ * Toutes les pages d'une liste de courses. Jolpica pagine par ligne de résultat :
+ * une course à cheval sur deux pages y apparaît deux fois, chacune avec une partie
+ * de ses résultats, qu'on regroupe.
+ */
+export async function jolpicaRaces(path: string): Promise<RawRace[]> {
+  const first = await jolpica<RawRaceTable & RawPage>(path)
+  const offsets: number[] = []
+  for (let offset = PAGE_SIZE; offset < Number(first.total); offset += PAGE_SIZE)
+    offsets.push(offset)
+  const rest = await Promise.all(offsets.map(offset => jolpica<RawRaceTable>(path, { offset })))
+
+  const races = new Map<string, RawRace>()
+  for (const race of [first, ...rest].flatMap(page => page.RaceTable.Races)) {
+    const key = `${race.season}/${race.round}`
+    const known = races.get(key)
+    if (!known) {
+      races.set(key, race)
+      continue
+    }
+    if (race.Results)
+      known.Results = [...known.Results ?? [], ...race.Results]
+    if (race.SprintResults)
+      known.SprintResults = [...known.SprintResults ?? [], ...race.SprintResults]
+  }
+  return [...races.values()]
 }
 
 // --- Normalisation ---
@@ -221,7 +265,7 @@ function toRace(raw: RawRace): Race {
   }
 }
 
-function toDriver(raw: RawDriver): Driver {
+export function toDriver(raw: RawDriver): Driver {
   return {
     id: raw.driverId,
     code: raw.code ?? raw.familyName.slice(0, 3).toUpperCase(),
@@ -232,7 +276,7 @@ function toDriver(raw: RawDriver): Driver {
   }
 }
 
-function toConstructor(raw: RawConstructor): Constructor {
+export function toConstructor(raw: RawConstructor): Constructor {
   return { id: raw.constructorId, name: raw.name, nationality: raw.nationality }
 }
 
@@ -277,14 +321,14 @@ function toQualifyingResult(raw: RawQualifyingResult): QualifyingResult {
 // Nitro de rafraîchir une entrée périmée via `event.waitUntil`. Sans lui, le Worker
 // coupe le rafraîchissement dès la réponse envoyée et l'entrée périmée est servie à vie.
 
-const CACHE_GROUP = 'jolpica'
+export const CACHE_GROUP = 'jolpica'
 
 /**
  * Au-delà d'une heure sans rafraîchissement, une entrée n'est plus servie périmée :
  * la requête attend Jolpica. Sans ce plafond, le premier visiteur après une période
  * creuse voyait le classement de la manche précédente (voir `freshWithin`).
  */
-const MAX_STALE = 60 * 60 * 1000
+export const MAX_STALE = 60 * 60 * 1000
 
 export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise<Schedule> => {
   const data = await jolpica<RawRaceTable>('current')
