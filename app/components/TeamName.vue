@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { Constructor } from '#shared/types/f1'
 
-defineProps<{
+// `constructor` dans un slot de template est résolu en `Object` : on passe par `props`
+const props = defineProps<{
   constructor: Constructor
   emphasis?: boolean
 }>()
@@ -14,6 +15,12 @@ defineProps<{
       :style="{ backgroundColor: teamColor(constructor.id) }"
       aria-hidden="true"
     />
-    <span class="truncate" :class="emphasis ? 'font-medium text-highlighted' : 'text-default'">{{ constructor.name }}</span>
+    <NuxtLink
+      :to="`/ecuries/${constructor.id}`"
+      class="truncate hover:underline hover:underline-offset-4"
+      :class="emphasis ? 'font-medium text-highlighted' : 'text-default'"
+    >
+      {{ props.constructor.name }}
+    </NuxtLink>
   </span>
 </template>

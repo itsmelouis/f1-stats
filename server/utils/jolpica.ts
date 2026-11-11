@@ -27,22 +27,25 @@ interface RawSession {
   time?: string
 }
 
-interface RawDriver {
+export interface RawDriver {
   driverId: string
   permanentNumber?: string
   code?: string
   givenName: string
   familyName: string
+  dateOfBirth?: string
   nationality: string
+  url?: string
 }
 
-interface RawConstructor {
+export interface RawConstructor {
   constructorId: string
   name: string
   nationality: string
+  url?: string
 }
 
-interface RawResult {
+export interface RawResult {
   position: string
   positionText: string
   points: string
@@ -64,7 +67,7 @@ interface RawQualifyingResult {
   Q3?: string
 }
 
-interface RawRace extends RawSession {
+export interface RawRace extends RawSession {
   season: string
   round: string
   url: string
@@ -87,11 +90,11 @@ interface RawRace extends RawSession {
   QualifyingResults?: RawQualifyingResult[]
 }
 
-interface RawRaceTable {
+export interface RawRaceTable {
   RaceTable: { season: string, Races: RawRace[] }
 }
 
-interface RawStandingsTable<T> {
+export interface RawStandingsTable<T> {
   StandingsTable: {
     season: string
     round: string
@@ -99,11 +102,12 @@ interface RawStandingsTable<T> {
   }
 }
 
-interface RawDriverStandingsList {
+export interface RawDriverStandingsList {
   season: string
   round: string
   DriverStandings: {
-    position: string
+    /** Absente pour les pilotes non classés (saisons anciennes) */
+    position?: string
     points: string
     wins: string
     Driver: RawDriver
@@ -111,11 +115,11 @@ interface RawDriverStandingsList {
   }[]
 }
 
-interface RawConstructorStandingsList {
+export interface RawConstructorStandingsList {
   season: string
   round: string
   ConstructorStandings: {
-    position: string
+    position?: string
     points: string
     wins: string
     Constructor: RawConstructor
@@ -144,10 +148,13 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function jolpica<T>(path: string, attempt = 0): Promise<T> {
+/** Jolpica renvoie au plus 100 lignes par page */
+const PAGE_SIZE = 100
+
+export async function jolpica<T>(path: string, query: { limit?: number, offset?: number } = {}, attempt = 0): Promise<T> {
   try {
     const data = await withSlot(() => $fetch<{ MRData: T }>(`${BASE_URL}/${path}.json`, {
-      query: { limit: 100 },
+      query: { limit: PAGE_SIZE, ...query },
       retry: 0,
     }))
     return data.MRData
@@ -159,8 +166,51 @@ async function jolpica<T>(path: string, attempt = 0): Promise<T> {
       throw error
     const retryAfter = Number(response?.headers.get('retry-after')) || 0
     await new Promise(resolve => setTimeout(resolve, retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt))
-    return jolpica<T>(path, attempt + 1)
+    return jolpica<T>(path, query, attempt + 1)
   }
+}
+
+interface RawPage {
+  total: string
+}
+
+/** Nombre de lignes d'une liste, sans la télécharger. */
+export async function jolpicaCount(path: string): Promise<number> {
+  const page = await jolpica<RawPage>(path, { limit: 1 })
+  return Number(page.total)
+}
+
+/**
+ * Toutes les pages d'une liste de courses. Jolpica pagine par ligne de résultat :
+ * une course à cheval sur deux pages y apparaît deux fois, chacune avec une partie
+ * de ses résultats, qu'on regroupe.
+ */
+/** Toutes les pages d'une liste (100 lignes par page). */
+export async function jolpicaPages<T>(path: string): Promise<T[]> {
+  const first = await jolpica<T & RawPage>(path)
+  const offsets: number[] = []
+  for (let offset = PAGE_SIZE; offset < Number(first.total); offset += PAGE_SIZE)
+    offsets.push(offset)
+  const rest = await Promise.all(offsets.map(offset => jolpica<T>(path, { offset })))
+  return [first, ...rest]
+}
+
+export async function jolpicaRaces(path: string): Promise<RawRace[]> {
+  const pages = await jolpicaPages<RawRaceTable>(path)
+  const races = new Map<string, RawRace>()
+  for (const race of pages.flatMap(page => page.RaceTable.Races)) {
+    const key = `${race.season}/${race.round}`
+    const known = races.get(key)
+    if (!known) {
+      races.set(key, race)
+      continue
+    }
+    if (race.Results)
+      known.Results = [...known.Results ?? [], ...race.Results]
+    if (race.SprintResults)
+      known.SprintResults = [...known.SprintResults ?? [], ...race.SprintResults]
+  }
+  return [...races.values()]
 }
 
 // --- Normalisation ---
@@ -221,7 +271,7 @@ function toRace(raw: RawRace): Race {
   }
 }
 
-function toDriver(raw: RawDriver): Driver {
+export function toDriver(raw: RawDriver): Driver {
   return {
     id: raw.driverId,
     code: raw.code ?? raw.familyName.slice(0, 3).toUpperCase(),
@@ -232,7 +282,7 @@ function toDriver(raw: RawDriver): Driver {
   }
 }
 
-function toConstructor(raw: RawConstructor): Constructor {
+export function toConstructor(raw: RawConstructor): Constructor {
   return { id: raw.constructorId, name: raw.name, nationality: raw.nationality }
 }
 
@@ -277,14 +327,14 @@ function toQualifyingResult(raw: RawQualifyingResult): QualifyingResult {
 // Nitro de rafraîchir une entrée périmée via `event.waitUntil`. Sans lui, le Worker
 // coupe le rafraîchissement dès la réponse envoyée et l'entrée périmée est servie à vie.
 
-const CACHE_GROUP = 'jolpica'
+export const CACHE_GROUP = 'jolpica'
 
 /**
  * Au-delà d'une heure sans rafraîchissement, une entrée n'est plus servie périmée :
  * la requête attend Jolpica. Sans ce plafond, le premier visiteur après une période
  * creuse voyait le classement de la manche précédente (voir `freshWithin`).
  */
-const MAX_STALE = 60 * 60 * 1000
+export const MAX_STALE = 60 * 60 * 1000
 
 export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise<Schedule> => {
   const data = await jolpica<RawRaceTable>('current')
@@ -305,9 +355,9 @@ export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise
  * Podiums de la saison par pilote et par écurie. Jolpica n'expose pas ce compteur,
  * mais on peut filtrer les résultats des Grands Prix par position d'arrivée (1, 2, 3).
  */
-async function fetchPodiums() {
+async function fetchPodiums(season: string) {
   const podiums = { drivers: {} as Record<string, number>, constructors: {} as Record<string, number> }
-  const tables = await Promise.all([1, 2, 3].map(position => jolpica<RawRaceTable>(`current/results/${position}`)))
+  const tables = await Promise.all([1, 2, 3].map(position => jolpica<RawRaceTable>(`${season}/results/${position}`)))
   for (const table of tables) {
     for (const race of table.RaceTable.Races) {
       for (const result of race.Results ?? []) {
@@ -325,20 +375,22 @@ async function fetchPodiums() {
  * page Classements se charge. Les podiums sont comptés dans le même appel (et non
  * dans un cache à part) pour qu'ils soient toujours de la même manche que les points.
  */
-export const getStandings = defineCachedFunction(async (_event: H3Event): Promise<SeasonStandings> => {
-  const [drivers, constructors, podiums] = await Promise.all([
-    jolpica<RawStandingsTable<RawDriverStandingsList>>('current/driverstandings'),
-    jolpica<RawStandingsTable<RawConstructorStandingsList>>('current/constructorstandings'),
-    fetchPodiums(),
+async function fetchStandings(_event: H3Event, season: string): Promise<SeasonStandings> {
+  // Plusieurs pages pour les saisons des années 1950 (108 pilotes en 1953)
+  const [driverPages, constructorPages, podiums] = await Promise.all([
+    jolpicaPages<RawStandingsTable<RawDriverStandingsList>>(`${season}/driverstandings`),
+    jolpicaPages<RawStandingsTable<RawConstructorStandingsList>>(`${season}/constructorstandings`),
+    fetchPodiums(season),
   ])
-  const driverList = drivers.StandingsTable.StandingsLists[0]
-  const constructorList = constructors.StandingsTable.StandingsLists[0]
+  const drivers = driverPages[0]!
+  const constructors = constructorPages[0]!
+  const position = (raw?: string) => (raw ? Number(raw) : null)
   return {
     drivers: {
       season: drivers.StandingsTable.season,
       round: Number(drivers.StandingsTable.round),
-      items: (driverList?.DriverStandings ?? []).map(s => ({
-        position: Number(s.position),
+      items: driverPages.flatMap(page => page.StandingsTable.StandingsLists[0]?.DriverStandings ?? []).map(s => ({
+        position: position(s.position),
         points: Number(s.points),
         wins: Number(s.wins),
         podiums: podiums.drivers[s.Driver.driverId] ?? 0,
@@ -350,8 +402,8 @@ export const getStandings = defineCachedFunction(async (_event: H3Event): Promis
     constructors: {
       season: constructors.StandingsTable.season,
       round: Number(constructors.StandingsTable.round),
-      items: (constructorList?.ConstructorStandings ?? []).map(s => ({
-        position: Number(s.position),
+      items: constructorPages.flatMap(page => page.StandingsTable.StandingsLists[0]?.ConstructorStandings ?? []).map(s => ({
+        position: position(s.position),
         points: Number(s.points),
         wins: Number(s.wins),
         podiums: podiums.constructors[s.Constructor.constructorId] ?? 0,
@@ -359,14 +411,30 @@ export const getStandings = defineCachedFunction(async (_event: H3Event): Promis
       })),
     },
   }
-}, {
+}
+
+const getCurrentStandings = defineCachedFunction(fetchStandings, {
   group: CACHE_GROUP,
   name: 'standings',
-  getKey: () => 'current',
+  getKey: (_event: H3Event, season: string) => season,
   maxAge: 60 * 10,
   swr: true,
   validate: freshWithin(MAX_STALE),
 })
+
+/** Une saison terminée ne bouge plus */
+const getPastStandings = defineCachedFunction(fetchStandings, {
+  group: CACHE_GROUP,
+  name: 'standings-past',
+  getKey: (_event: H3Event, season: string) => season,
+  maxAge: 60 * 60 * 24 * 30,
+  swr: true,
+})
+
+/** Classements de la saison en cours, ou d'une saison passée (`AAAA`). */
+export function getStandings(event: H3Event, season?: string): Promise<SeasonStandings> {
+  return season ? getPastStandings(event, season) : getCurrentStandings(event, 'current')
+}
 
 /**
  * Complète avec OpenF1 les sessions terminées que Jolpica n'a pas encore publiées

@@ -8,20 +8,23 @@ defineProps<{
 
 <template>
   <div class="mb-10 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b border-default pb-6">
-    <div class="min-w-0">
-      <p v-if="eyebrow" class="text-sm text-muted">
-        {{ eyebrow }}
-      </p>
-      <h1 class="mt-1 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">
-        <slot name="title">
-          {{ title }}
-        </slot>
-      </h1>
-      <p v-if="description || $slots.description" class="mt-2 text-muted">
-        <slot name="description">
-          {{ description }}
-        </slot>
-      </p>
+    <div class="flex min-w-0 items-end gap-5">
+      <slot name="media" />
+      <div class="min-w-0">
+        <p v-if="eyebrow" class="text-sm text-muted">
+          {{ eyebrow }}
+        </p>
+        <h1 class="mt-1 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">
+          <slot name="title">
+            {{ title }}
+          </slot>
+        </h1>
+        <p v-if="description || $slots.description" class="mt-2 text-muted">
+          <slot name="description">
+            {{ description }}
+          </slot>
+        </p>
+      </div>
     </div>
     <div v-if="$slots.right" class="shrink-0 text-sm text-muted tabular-nums">
       <slot name="right" />

@@ -16,8 +16,14 @@ const sources: Source[] = [
   {
     name: 'OpenF1',
     url: 'https://openf1.org',
-    usage: 'Résultats du week-end en cours, en attendant que Jolpica les publie (souvent le lendemain). Disponibles 30 minutes après la fin de chaque session.',
+    usage: 'Résultats du week-end en cours, en attendant que Jolpica les publie (souvent le lendemain). Disponibles 30 minutes après la fin de chaque session. Fournit aussi le lien des photos des pilotes.',
     license: { label: 'non commerciale', url: 'https://openf1.org' },
+  },
+  {
+    name: 'formula1.com',
+    url: 'https://www.formula1.com',
+    usage: 'Photos officielles des pilotes (depuis 2023) et logos des écuries actuelles, affichés depuis les serveurs de formula1.com.',
+    license: { label: '© Formula One World Championship Limited', url: 'https://www.formula1.com/en/information/legal-notices.7egvZU48hzrypubGBNcQKt' },
   },
   {
     name: 'bacinger/f1-circuits',
@@ -71,6 +77,13 @@ useSeoMeta({
       <p>
         Site personnel et non commercial, sans lien avec Formula One Licensing BV ni avec la FIA.
         F1, FORMULA ONE et FORMULA 1 sont des marques de Formula One Licensing BV.
+      </p>
+      <p>
+        Une image ou une donnée pose problème ? Écrivez à
+        <ULink to="mailto:me@itslouis.dev" class="underline underline-offset-2 hover:text-highlighted">
+          me@itslouis.dev
+        </ULink>,
+        elle sera retirée.
       </p>
     </div>
   </UContainer>

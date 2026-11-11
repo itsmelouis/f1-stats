@@ -50,7 +50,9 @@ function positionsGained(result: SessionResult) {
             <DriverName :driver="result.driver" :constructor="result.constructor" />
           </td>
           <td class="hidden text-muted md:table-cell">
-            {{ result.constructor.name }}
+            <NuxtLink :to="`/ecuries/${result.constructor.id}`" class="hover:text-highlighted">
+              {{ result.constructor.name }}
+            </NuxtLink>
           </td>
           <td class="f1-num hidden text-muted sm:table-cell">
             {{ result.grid || '–' }}<span

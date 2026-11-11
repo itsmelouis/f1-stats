@@ -14,9 +14,9 @@ defineProps<{
       :style="{ backgroundColor: teamColor(constructor.id) }"
       aria-hidden="true"
     />
-    <span class="truncate">
+    <NuxtLink :to="`/pilotes/${driver.id}`" class="truncate hover:underline hover:underline-offset-4">
       <span class="text-muted">{{ driver.firstName }}&nbsp;</span>
       <span class="font-medium uppercase text-highlighted">{{ driver.lastName }}</span>
-    </span>
+    </NuxtLink>
   </span>
 </template>

@@ -38,7 +38,9 @@ defineProps<{
             <DriverName :driver="result.driver" :constructor="result.constructor" />
           </td>
           <td class="hidden text-muted md:table-cell">
-            {{ result.constructor.name }}
+            <NuxtLink :to="`/ecuries/${result.constructor.id}`" class="hover:text-highlighted">
+              {{ result.constructor.name }}
+            </NuxtLink>
           </td>
           <td class="f1-num" :class="result.q1 ? 'text-muted' : 'text-dimmed'">
             {{ result.q1 ?? '–' }}

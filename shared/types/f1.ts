@@ -59,7 +59,8 @@ export interface Constructor {
 }
 
 export interface DriverStanding {
-  position: number
+  /** `null` pour un pilote non classé (saisons anciennes) */
+  position: number | null
   points: number
   wins: number
   /** Podiums en Grand Prix (sprints exclus) */
@@ -69,7 +70,7 @@ export interface DriverStanding {
 }
 
 export interface ConstructorStanding {
-  position: number
+  position: number | null
   points: number
   wins: number
   /** Podiums en Grand Prix (sprints exclus), toutes voitures confondues */
@@ -152,4 +153,106 @@ export interface RaceDetail {
   qualifying: QualifyingResult[] | null
   /** Top du vote « Pilote du jour », `null` tant que le vote n'est pas publié */
   driverOfTheDay: DriverOfTheDayVote[] | null
+}
+
+// --- Fiches pilote et écurie ---
+
+export interface DriverProfile extends Driver {
+  /** AAAA-MM-JJ */
+  dateOfBirth: string
+  /** Page Wikipédia (anglais) */
+  url: string
+  /** Photo officielle (formula1.com via OpenF1), pilotes depuis 2023 seulement */
+  photo: string | null
+}
+
+export interface ConstructorProfile extends Constructor {
+  /** Page Wikipédia (anglais) */
+  url: string
+}
+
+/** Compteurs en Grand Prix (sprints exclus), sur une carrière ou une saison */
+export interface RaceStats {
+  races: number
+  wins: number
+  /** Podiums ; pour une écurie, toutes voitures confondues */
+  podiums: number
+  /** Départs en pole (1er sur la grille), au plus près des poles officielles */
+  poles: number
+  fastestLaps: number
+}
+
+/** Classement d'une saison ; `final` est faux tant que la saison n'est pas terminée */
+export interface SeasonStanding {
+  position: number
+  points: number
+  final: boolean
+}
+
+/** Une saison dans le tableau de carrière d'un pilote */
+export interface DriverSeasonSummary extends RaceStats {
+  season: string
+  constructors: Constructor[]
+  /** Meilleure arrivée en Grand Prix, `null` s'il n'a jamais été classé */
+  bestFinish: number | null
+  /** Place au championnat (provisoire pour la saison en cours), `null` si non classé */
+  standing: number | null
+  champion: boolean
+}
+
+export interface DriverCareer {
+  driver: DriverProfile
+  stats: RaceStats
+  /** Saisons titrées */
+  titles: string[]
+  /** De la plus récente à la plus ancienne */
+  seasons: DriverSeasonSummary[]
+}
+
+/** Résultat d'un pilote sur un Grand Prix */
+export interface RoundEntry {
+  driver: Driver
+  constructor: Constructor
+  grid: number
+  position: number | null
+  positionText: string
+  status: string
+  /** Points du Grand Prix et du sprint du même week-end */
+  points: number
+}
+
+export interface SeasonRound {
+  round: number
+  name: string
+  /** Une ligne par voiture (plusieurs pour une écurie) */
+  entries: RoundEntry[]
+  /** Points du week-end (Grand Prix et sprint) */
+  points: number
+}
+
+export interface DriverSeason {
+  season: string
+  standing: SeasonStanding | null
+  stats: RaceStats
+  champion: boolean
+  rounds: SeasonRound[]
+}
+
+export interface ConstructorCareer {
+  constructor: ConstructorProfile
+  stats: RaceStats
+  /** Titres constructeurs (décernés depuis 1958) */
+  titles: string[]
+  /** De la plus récente à la plus ancienne */
+  seasons: string[]
+}
+
+export interface ConstructorSeason {
+  season: string
+  /** `null` avant 1958 (pas de championnat constructeurs) */
+  standing: SeasonStanding | null
+  stats: RaceStats
+  champion: boolean
+  drivers: { driver: Driver, races: number, points: number }[]
+  rounds: SeasonRound[]
 }
