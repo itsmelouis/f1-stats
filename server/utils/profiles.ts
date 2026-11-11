@@ -78,6 +78,23 @@ function titlesOf(champions: Record<string, string>, id: string) {
 
 // --- Normalisation ---
 
+/**
+ * Lien externe venu de l'API, rendu tel quel dans un `href` : seul `https:` passe
+ * (un `javascript:` exécuterait du code au clic). Jolpica donne souvent des liens
+ * Wikipédia en `http:`, qu'on passe en `https:` ; le reste devient une chaîne vide.
+ */
+function httpsUrl(url: string | undefined) {
+  try {
+    const parsed = new URL(url ?? '')
+    if (parsed.protocol === 'http:')
+      parsed.protocol = 'https:'
+    return parsed.protocol === 'https:' ? parsed.href : ''
+  }
+  catch {
+    return ''
+  }
+}
+
 function finishedWithin(result: RawResult, max: number) {
   return /^\d+$/.test(result.positionText) && Number(result.positionText) <= max
 }
@@ -200,7 +217,7 @@ async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCare
 
   const driver = toDriver(raw)
   return {
-    driver: { ...driver, dateOfBirth: raw.dateOfBirth ?? '', url: raw.url ?? '', photo: await getDriverHeadshot(event, driver) },
+    driver: { ...driver, dateOfBirth: raw.dateOfBirth ?? '', url: httpsUrl(raw.url), photo: await getDriverHeadshot(event, driver) },
     stats: countStats(races),
     titles: titlesOf(champions.drivers, id),
     seasons: seasons.sort((a, b) => b.season.localeCompare(a.season)),
@@ -258,7 +275,7 @@ async function fetchConstructorCareer(event: H3Event, id: string): Promise<Const
     return null
 
   return {
-    constructor: { ...toConstructor(raw), url: raw.url ?? '' },
+    constructor: { ...toConstructor(raw), url: httpsUrl(raw.url) },
     stats: { races, wins, podiums: wins + seconds + thirds, poles, fastestLaps },
     titles: titlesOf(champions.constructors, id),
     seasons: seasons.SeasonTable.Seasons.map(s => s.season).sort().reverse(),
