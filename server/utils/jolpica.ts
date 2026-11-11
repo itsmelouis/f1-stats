@@ -106,7 +106,8 @@ export interface RawDriverStandingsList {
   season: string
   round: string
   DriverStandings: {
-    position: string
+    /** Absente pour les pilotes non classés (saisons anciennes) */
+    position?: string
     points: string
     wins: string
     Driver: RawDriver
@@ -118,7 +119,7 @@ export interface RawConstructorStandingsList {
   season: string
   round: string
   ConstructorStandings: {
-    position: string
+    position?: string
     points: string
     wins: string
     Constructor: RawConstructor
@@ -184,15 +185,20 @@ export async function jolpicaCount(path: string): Promise<number> {
  * une course à cheval sur deux pages y apparaît deux fois, chacune avec une partie
  * de ses résultats, qu'on regroupe.
  */
-export async function jolpicaRaces(path: string): Promise<RawRace[]> {
-  const first = await jolpica<RawRaceTable & RawPage>(path)
+/** Toutes les pages d'une liste (100 lignes par page). */
+async function jolpicaPages<T>(path: string): Promise<T[]> {
+  const first = await jolpica<T & RawPage>(path)
   const offsets: number[] = []
   for (let offset = PAGE_SIZE; offset < Number(first.total); offset += PAGE_SIZE)
     offsets.push(offset)
-  const rest = await Promise.all(offsets.map(offset => jolpica<RawRaceTable>(path, { offset })))
+  const rest = await Promise.all(offsets.map(offset => jolpica<T>(path, { offset })))
+  return [first, ...rest]
+}
 
+export async function jolpicaRaces(path: string): Promise<RawRace[]> {
+  const pages = await jolpicaPages<RawRaceTable>(path)
   const races = new Map<string, RawRace>()
-  for (const race of [first, ...rest].flatMap(page => page.RaceTable.Races)) {
+  for (const race of pages.flatMap(page => page.RaceTable.Races)) {
     const key = `${race.season}/${race.round}`
     const known = races.get(key)
     if (!known) {
@@ -349,9 +355,9 @@ export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise
  * Podiums de la saison par pilote et par écurie. Jolpica n'expose pas ce compteur,
  * mais on peut filtrer les résultats des Grands Prix par position d'arrivée (1, 2, 3).
  */
-async function fetchPodiums() {
+async function fetchPodiums(season: string) {
   const podiums = { drivers: {} as Record<string, number>, constructors: {} as Record<string, number> }
-  const tables = await Promise.all([1, 2, 3].map(position => jolpica<RawRaceTable>(`current/results/${position}`)))
+  const tables = await Promise.all([1, 2, 3].map(position => jolpica<RawRaceTable>(`${season}/results/${position}`)))
   for (const table of tables) {
     for (const race of table.RaceTable.Races) {
       for (const result of race.Results ?? []) {
@@ -369,20 +375,22 @@ async function fetchPodiums() {
  * page Classements se charge. Les podiums sont comptés dans le même appel (et non
  * dans un cache à part) pour qu'ils soient toujours de la même manche que les points.
  */
-export const getStandings = defineCachedFunction(async (_event: H3Event): Promise<SeasonStandings> => {
-  const [drivers, constructors, podiums] = await Promise.all([
-    jolpica<RawStandingsTable<RawDriverStandingsList>>('current/driverstandings'),
-    jolpica<RawStandingsTable<RawConstructorStandingsList>>('current/constructorstandings'),
-    fetchPodiums(),
+async function fetchStandings(_event: H3Event, season: string): Promise<SeasonStandings> {
+  // Plusieurs pages pour les saisons des années 1950 (108 pilotes en 1953)
+  const [driverPages, constructorPages, podiums] = await Promise.all([
+    jolpicaPages<RawStandingsTable<RawDriverStandingsList>>(`${season}/driverstandings`),
+    jolpicaPages<RawStandingsTable<RawConstructorStandingsList>>(`${season}/constructorstandings`),
+    fetchPodiums(season),
   ])
-  const driverList = drivers.StandingsTable.StandingsLists[0]
-  const constructorList = constructors.StandingsTable.StandingsLists[0]
+  const drivers = driverPages[0]!
+  const constructors = constructorPages[0]!
+  const position = (raw?: string) => (raw ? Number(raw) : null)
   return {
     drivers: {
       season: drivers.StandingsTable.season,
       round: Number(drivers.StandingsTable.round),
-      items: (driverList?.DriverStandings ?? []).map(s => ({
-        position: Number(s.position),
+      items: driverPages.flatMap(page => page.StandingsTable.StandingsLists[0]?.DriverStandings ?? []).map(s => ({
+        position: position(s.position),
         points: Number(s.points),
         wins: Number(s.wins),
         podiums: podiums.drivers[s.Driver.driverId] ?? 0,
@@ -394,8 +402,8 @@ export const getStandings = defineCachedFunction(async (_event: H3Event): Promis
     constructors: {
       season: constructors.StandingsTable.season,
       round: Number(constructors.StandingsTable.round),
-      items: (constructorList?.ConstructorStandings ?? []).map(s => ({
-        position: Number(s.position),
+      items: constructorPages.flatMap(page => page.StandingsTable.StandingsLists[0]?.ConstructorStandings ?? []).map(s => ({
+        position: position(s.position),
         points: Number(s.points),
         wins: Number(s.wins),
         podiums: podiums.constructors[s.Constructor.constructorId] ?? 0,
@@ -403,14 +411,30 @@ export const getStandings = defineCachedFunction(async (_event: H3Event): Promis
       })),
     },
   }
-}, {
+}
+
+const getCurrentStandings = defineCachedFunction(fetchStandings, {
   group: CACHE_GROUP,
   name: 'standings',
-  getKey: () => 'current',
+  getKey: (_event: H3Event, season: string) => season,
   maxAge: 60 * 10,
   swr: true,
   validate: freshWithin(MAX_STALE),
 })
+
+/** Une saison terminée ne bouge plus */
+const getPastStandings = defineCachedFunction(fetchStandings, {
+  group: CACHE_GROUP,
+  name: 'standings-past',
+  getKey: (_event: H3Event, season: string) => season,
+  maxAge: 60 * 60 * 24 * 30,
+  swr: true,
+})
+
+/** Classements de la saison en cours, ou d'une saison passée (`AAAA`). */
+export function getStandings(event: H3Event, season?: string): Promise<SeasonStandings> {
+  return season ? getPastStandings(event, season) : getCurrentStandings(event, 'current')
+}
 
 /**
  * Complète avec OpenF1 les sessions terminées que Jolpica n'a pas encore publiées

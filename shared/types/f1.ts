@@ -59,7 +59,8 @@ export interface Constructor {
 }
 
 export interface DriverStanding {
-  position: number
+  /** `null` pour un pilote non classé (saisons anciennes) */
+  position: number | null
   points: number
   wins: number
   /** Podiums en Grand Prix (sprints exclus) */
@@ -69,7 +70,7 @@ export interface DriverStanding {
 }
 
 export interface ConstructorStanding {
-  position: number
+  position: number | null
   points: number
   wins: number
   /** Podiums en Grand Prix (sprints exclus), toutes voitures confondues */
