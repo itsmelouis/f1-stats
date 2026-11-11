@@ -11,6 +11,13 @@ if (error.value) {
 const races = computed(() => schedule.value?.races ?? [])
 const nextRace = computed(() => races.value.find(r => r.at >= now.value))
 const completed = computed(() => races.value.filter(r => r.at < now.value).length)
+const lastRace = computed(() => races.value.findLast(r => r.at < now.value))
+
+// Podium de la dernière course ; un échec ne doit pas casser l'accueil
+const { data: lastResults } = await useFetch(() => `/api/races/${lastRace.value?.round}`, {
+  immediate: Boolean(lastRace.value),
+  pick: ['results'],
+})
 const groups = computed(() => groupRacesByMonth(races.value))
 
 useSeoMeta({
@@ -27,6 +34,8 @@ useSeoMeta({
     </PageHeader>
 
     <NextRaceHero v-if="nextRace" :race="nextRace" />
+
+    <LastRace v-if="lastRace" :race="lastRace" :results="lastResults?.results ?? null" />
 
     <div class="flex flex-col gap-10">
       <section v-for="group in groups" :key="group.month">
