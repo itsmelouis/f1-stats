@@ -162,6 +162,8 @@ export interface DriverProfile extends Driver {
   dateOfBirth: string
   /** Page Wikipédia (anglais) */
   url: string
+  /** Photo officielle (formula1.com via OpenF1), pilotes depuis 2023 seulement */
+  photo: string | null
 }
 
 export interface ConstructorProfile extends Constructor {

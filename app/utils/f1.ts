@@ -164,6 +164,32 @@ export function raceName(name: string) {
   return RACE_NAMES_FR[name] ?? name
 }
 
+/**
+ * Dossiers des logos officiels sur formula1.com, pour les écuries de la grille 2026.
+ * Les écuries disparues n'en ont pas et gardent leur barre de couleur.
+ */
+const TEAM_LOGO_SLUGS: Record<string, string> = {
+  alpine: 'alpine',
+  aston_martin: 'astonmartin',
+  audi: 'audi',
+  cadillac: 'cadillac',
+  ferrari: 'ferrari',
+  haas: 'haasf1team',
+  mclaren: 'mclaren',
+  mercedes: 'mercedes',
+  rb: 'racingbulls',
+  red_bull: 'redbullracing',
+  williams: 'williams',
+}
+
+/** Logo officiel monochrome (noir pour le thème clair, blanc pour le sombre), `null` si inconnu. */
+export function teamLogo(constructorId: string, variant: 'black' | 'white') {
+  const slug = TEAM_LOGO_SLUGS[constructorId]
+  if (!slug)
+    return null
+  return `https://media.formula1.com/image/upload/c_lfill,w_128/q_auto/v1740000001/common/f1/2026/${slug}/2026${slug}logo${variant}.webp`
+}
+
 export function teamColor(constructorId: string) {
   return TEAM_COLORS[constructorId] ?? '#71717A'
 }

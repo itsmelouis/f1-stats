@@ -25,6 +25,8 @@ interface RawDriver {
   first_name: string
   last_name: string
   team_name: string
+  /** Photo officielle (formula1.com), absente pour certaines sessions */
+  headshot_url?: string | null
 }
 
 interface RawResult {
@@ -62,6 +64,46 @@ const getSessions = defineCachedFunction(
   (_event: H3Event, year: string) => openf1<RawSession>('sessions', { year }),
   { group: 'openf1', name: 'sessions', getKey: (_event: H3Event, year: string) => year, maxAge: 60 * 60, swr: true },
 )
+
+// --- Photos des pilotes ---
+
+/** « Hülkenberg » → « hulkenberg », pour rapprocher les noms Jolpica et OpenF1 */
+function normalizeName(name: string) {
+  return name.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
+}
+
+function headshotKey(code: string, lastName: string) {
+  // Le trigramme seul ne suffit pas : Michael et Mick Schumacher sont tous deux « MSC »
+  return `${code}/${normalizeName(lastName)}`
+}
+
+/**
+ * Photos officielles de tous les pilotes connus d'OpenF1 (depuis 2023), par trigramme
+ * et nom. La liste complète pèse ~4 Mo : on n'en garde que les URL, une semaine.
+ */
+const getHeadshots = defineCachedFunction(async (_event: H3Event): Promise<Record<string, string>> => {
+  const drivers = await openf1<RawDriver>('drivers', {})
+  const headshots: Record<string, string> = {}
+  // Les sessions arrivent dans l'ordre chronologique : la dernière photo l'emporte
+  for (const driver of drivers) {
+    if (driver.headshot_url && driver.last_name)
+      // `1col` est une vignette de 93 px ; `2col` fait 206 px
+      headshots[headshotKey(driver.name_acronym, driver.last_name)] = driver.headshot_url.replace('/1col/', '/2col/')
+  }
+  return headshots
+}, { group: 'openf1', name: 'headshots', getKey: () => 'all', maxAge: 7 * 24 * 60 * 60, swr: true })
+
+/** Photo officielle d'un pilote, `null` pour les pilotes d'avant 2023 ou si OpenF1 ne répond pas. */
+export async function getDriverHeadshot(event: H3Event, driver: Driver): Promise<string | null> {
+  try {
+    const headshots = await getHeadshots(event)
+    return headshots[headshotKey(driver.code, driver.lastName)] ?? null
+  }
+  catch (error) {
+    console.error('[openf1]', error)
+    return null
+  }
+}
 
 // --- Normalisation ---
 

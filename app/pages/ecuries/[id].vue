@@ -24,6 +24,7 @@ const { data: detail, status: detailStatus } = await useAsyncData(
 // Pas de variable `constructor` : dans un template, Vue la résout en `Object`
 const team = computed(() => career.value!.constructor)
 const titles = computed(() => new Set(career.value!.titles))
+const logo = computed(() => ({ light: teamLogo(team.value.id, 'black'), dark: teamLogo(team.value.id, 'white') }))
 
 const careerStats = computed(() => {
   const { stats } = career.value!
@@ -66,9 +67,14 @@ useSeoMeta({
     </div>
 
     <PageHeader :eyebrow="`Écurie · ${nationalityCountry(team.nationality)}`" :title="team.name">
+      <template v-if="logo.light && logo.dark" #media>
+        <!-- Logo monochrome assorti au thème -->
+        <img :src="logo.light" alt="" width="64" height="64" class="size-16 shrink-0 object-contain dark:hidden">
+        <img :src="logo.dark" alt="" width="64" height="64" class="hidden size-16 shrink-0 object-contain dark:block">
+      </template>
       <template #title>
         <span class="flex items-center gap-4">
-          <span class="h-8 w-1 shrink-0" :style="{ backgroundColor: teamColor(team.id) }" aria-hidden="true" />
+          <span v-if="!logo.light" class="h-8 w-1 shrink-0" :style="{ backgroundColor: teamColor(team.id) }" aria-hidden="true" />
           {{ team.name }}
         </span>
       </template>

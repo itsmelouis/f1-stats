@@ -198,8 +198,9 @@ async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCare
     }
   }))
 
+  const driver = toDriver(raw)
   return {
-    driver: { ...toDriver(raw), dateOfBirth: raw.dateOfBirth ?? '', url: raw.url ?? '' },
+    driver: { ...driver, dateOfBirth: raw.dateOfBirth ?? '', url: raw.url ?? '', photo: await getDriverHeadshot(event, driver) },
     stats: countStats(races),
     titles: titlesOf(champions.drivers, id),
     seasons: seasons.sort((a, b) => b.season.localeCompare(a.season)),

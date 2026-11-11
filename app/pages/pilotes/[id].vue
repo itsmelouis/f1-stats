@@ -76,6 +76,10 @@ useSeoMeta({
     </div>
 
     <PageHeader :eyebrow="eyebrow" :title="fullName">
+      <!-- Photo détourée posée sur le filet de l'en-tête -->
+      <template v-if="driver.photo" #media>
+        <img :src="driver.photo" :alt="fullName" width="112" height="112" class="size-20 shrink-0 object-contain object-bottom sm:-mb-6 sm:size-28">
+      </template>
       <template #title>
         <span class="font-normal text-muted">{{ driver.firstName }}</span> <span class="uppercase">{{ driver.lastName }}</span>
       </template>
