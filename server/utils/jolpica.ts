@@ -186,7 +186,7 @@ export async function jolpicaCount(path: string): Promise<number> {
  * de ses résultats, qu'on regroupe.
  */
 /** Toutes les pages d'une liste (100 lignes par page). */
-async function jolpicaPages<T>(path: string): Promise<T[]> {
+export async function jolpicaPages<T>(path: string): Promise<T[]> {
   const first = await jolpica<T & RawPage>(path)
   const offsets: number[] = []
   for (let offset = PAGE_SIZE; offset < Number(first.total); offset += PAGE_SIZE)

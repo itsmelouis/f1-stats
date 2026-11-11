@@ -100,7 +100,7 @@ useSeoMeta({
     <template v-if="!season">
       <StatList :items="careerStats" />
       <p v-if="career!.titles.length" class="mt-4 text-sm text-muted">
-        Champion du monde en {{ career!.titles.join(', ') }}.
+        Champion du monde en {{ career!.titles.join(', ') }} (en rouge dans le tableau).
       </p>
 
       <h2 class="mt-12 mb-3 text-sm font-medium text-muted">
@@ -113,6 +113,9 @@ useSeoMeta({
               <th>Saison</th>
               <th>Écurie</th>
               <th class="f1-num">
+                Championnat
+              </th>
+              <th class="f1-num hidden sm:table-cell">
                 GP
               </th>
               <th class="f1-num">
@@ -125,7 +128,7 @@ useSeoMeta({
                 Poles
               </th>
               <th class="f1-num hidden sm:table-cell">
-                Meilleur
+                Meilleure arrivée
               </th>
             </tr>
           </thead>
@@ -135,14 +138,20 @@ useSeoMeta({
                 <NuxtLink :to="{ query: { saison: item.season } }" class="font-mono font-medium text-highlighted tabular-nums hover:underline hover:underline-offset-4">
                   {{ item.season }}
                 </NuxtLink>
-                <span v-if="item.champion" class="ml-2 text-xs text-primary">Champion</span>
               </td>
               <td>
                 <span class="flex flex-col gap-1">
                   <TeamName v-for="team in item.constructors" :key="team.id" :constructor="team" />
                 </span>
               </td>
-              <td class="f1-num text-muted">
+              <td
+                class="f1-num"
+                :class="item.champion ? 'font-semibold text-primary' : 'text-highlighted'"
+                :title="item.champion ? `Champion du monde ${item.season}` : undefined"
+              >
+                {{ item.standing ? formatRank(item.standing) : '—' }}
+              </td>
+              <td class="f1-num hidden text-muted sm:table-cell">
                 {{ item.races }}
               </td>
               <td class="f1-num" :class="item.wins ? 'text-highlighted' : 'text-dimmed'">

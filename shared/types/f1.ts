@@ -193,6 +193,8 @@ export interface DriverSeasonSummary extends RaceStats {
   constructors: Constructor[]
   /** Meilleure arrivée en Grand Prix, `null` s'il n'a jamais été classé */
   bestFinish: number | null
+  /** Place au championnat (provisoire pour la saison en cours), `null` si non classé */
+  standing: number | null
   champion: boolean
 }
 

@@ -20,7 +20,7 @@ import type {
   RawStandingsTable,
 } from './jolpica'
 import { CONSTRUCTOR_CHAMPIONS, DRIVER_CHAMPIONS, LAST_KNOWN_CHAMPIONS_SEASON } from './champions'
-import { CACHE_GROUP, jolpica, jolpicaCount, jolpicaRaces, MAX_STALE, toConstructor, toDriver } from './jolpica'
+import { CACHE_GROUP, jolpica, jolpicaCount, jolpicaPages, jolpicaRaces, MAX_STALE, toConstructor, toDriver } from './jolpica'
 
 /**
  * Fiches pilote et écurie : carrière complète, ou une saison en détail.
@@ -140,11 +140,41 @@ async function seasonContext(event: H3Event, season: string) {
 
 // --- Pilotes ---
 
+/**
+ * Place de chaque pilote au championnat d'une saison passée. Un seul cache par saison,
+ * partagé par toutes les fiches : la première fiche d'un pilote coûte un appel par
+ * saison disputée, les suivantes en réutilisent la plupart.
+ */
+const getPastDriverPositions = defineCachedFunction(async (_event: H3Event, season: string): Promise<Record<string, number>> => {
+  const pages = await jolpicaPages<RawStandingsTable<RawDriverStandingsList>>(`${season}/driverstandings`)
+  const positions: Record<string, number> = {}
+  for (const standing of pages.flatMap(page => page.StandingsTable.StandingsLists[0]?.DriverStandings ?? [])) {
+    if (standing.position)
+      positions[standing.Driver.driverId] = Number(standing.position)
+  }
+  return positions
+}, {
+  group: CACHE_GROUP,
+  name: 'driver-positions',
+  getKey: (_event: H3Event, season: string) => season,
+  maxAge: 30 * DAY,
+  swr: true,
+})
+
+/** Place d'un pilote au championnat ; la saison en cours vient du classement déjà en cache. */
+async function driverPosition(event: H3Event, id: string, season: string, currentSeason: string) {
+  if (season !== currentSeason)
+    return (await getPastDriverPositions(event, season))[id] ?? null
+  const standings = await getStandings(event)
+  return standings.drivers.items.find(item => item.driver.id === id)?.position ?? null
+}
+
 async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCareer | null> {
-  const [info, races, champions] = await Promise.all([
+  const [info, races, champions, schedule] = await Promise.all([
     jolpica<{ DriverTable: { Drivers: RawDriver[] } }>(`drivers/${id}`),
     jolpicaRaces(`drivers/${id}/results`),
     getChampions(event),
+    getSchedule(event),
   ])
   const raw = info.DriverTable.Drivers[0]
   if (!raw)
@@ -154,7 +184,7 @@ async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCare
   for (const race of races)
     bySeason.set(race.season, [...bySeason.get(race.season) ?? [], race])
 
-  const seasons = [...bySeason].map(([season, seasonRaces]): DriverSeasonSummary => {
+  const seasons = await Promise.all([...bySeason].map(async ([season, seasonRaces]): Promise<DriverSeasonSummary> => {
     const results = seasonRaces.flatMap(race => race.Results ?? [])
     const constructors = new Map(results.map(r => [r.Constructor.constructorId, toConstructor(r.Constructor)]))
     const finishes = results.filter(r => /^\d+$/.test(r.positionText)).map(r => Number(r.positionText))
@@ -163,9 +193,10 @@ async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCare
       ...countStats(seasonRaces),
       constructors: [...constructors.values()],
       bestFinish: finishes.length ? Math.min(...finishes) : null,
+      standing: await driverPosition(event, id, season, schedule.season),
       champion: champions.drivers[season] === id,
     }
-  })
+  }))
 
   return {
     driver: { ...toDriver(raw), dateOfBirth: raw.dateOfBirth ?? '', url: raw.url ?? '' },
