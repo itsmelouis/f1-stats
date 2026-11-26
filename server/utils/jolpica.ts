@@ -127,19 +127,41 @@ export interface RawConstructorStandingsList {
 }
 
 /**
- * Jolpica tolère ~4 requêtes/s par IP, et en production les IP sortantes du Worker
- * sont partagées : on limite la concurrence et on réessaie sur 429 avec un délai.
+ * Jolpica tolère ~4 requêtes/s et 500 requêtes/h par IP. Or Jolpica est derrière
+ * Cloudflare, qui présente toutes les requêtes venues d'un Worker, quel que soit
+ * le compte, sous une même IP (2a06:98c0:3600::103) : ce quota est partagé avec
+ * tous les Workers qui appellent Jolpica, d'où des 429 fréquents même à faible trafic.
+ *
+ * Les appels partent donc deux à la fois au plus, espacés de `MIN_INTERVAL` (sous le
+ * burst), et un 429 met toute la file en pause le temps demandé : sans ça, les appels
+ * en attente continuaient de frapper pendant le délai et prolongeaient le blocage.
+ * Quand Jolpica refuse malgré tout, le cache sert la dernière valeur connue
+ * (`defineLiveCachedFunction`).
  */
 const MAX_CONCURRENT = 2
+/** Délai minimal (ms) entre deux départs d'appel */
+const MIN_INTERVAL = 300
 const MAX_RETRIES = 3
+/** Plafond (s) du `Retry-After` qu'on accepte d'attendre pendant une requête */
+const MAX_RETRY_AFTER = 5
 let inFlight = 0
 const waiting: (() => void)[] = []
+/** Heure (ms) avant laquelle aucun appel ne part ; un 429 la repousse */
+let nextStart = 0
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   if (inFlight >= MAX_CONCURRENT)
     await new Promise<void>(resolve => waiting.push(resolve))
   inFlight++
   try {
+    // `nextStart` peut reculer pendant l'attente (429 sur un autre appel) : on revérifie
+    while (Date.now() < nextStart)
+      await sleep(nextStart - Date.now())
+    nextStart = Date.now() + MIN_INTERVAL
     return await fn()
   }
   finally {
@@ -172,8 +194,12 @@ export async function jolpica<T>(path: string, query: { limit?: number, offset?:
     const retryable = statusCode === 429 || (statusCode !== undefined && statusCode >= 500)
     if (!retryable || attempt >= MAX_RETRIES)
       throw error
-    const retryAfter = Number(response?.headers.get('retry-after')) || 0
-    await new Promise(resolve => setTimeout(resolve, retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt))
+    const retryAfter = Math.min(Number(response?.headers.get('retry-after')) || 0, MAX_RETRY_AFTER)
+    const delay = retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt
+    if (statusCode === 429)
+      nextStart = Math.max(nextStart, Date.now() + delay)
+    else
+      await sleep(delay)
     return jolpica<T>(path, query, attempt + 1)
   }
 }
@@ -339,12 +365,13 @@ export const CACHE_GROUP = 'jolpica'
 
 /**
  * Au-delà d'une heure sans rafraîchissement, une entrée n'est plus servie périmée :
- * la requête attend Jolpica. Sans ce plafond, le premier visiteur après une période
- * creuse voyait le classement de la manche précédente (voir `freshWithin`).
+ * la requête attend Jolpica, et ne se rabat sur l'entrée que si Jolpica refuse.
+ * Sans ce plafond, le premier visiteur après une période creuse voyait le classement
+ * de la manche précédente (voir `defineLiveCachedFunction`).
  */
 export const MAX_STALE = 60 * 60 * 1000
 
-export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise<Schedule> => {
+export const getSchedule = defineLiveCachedFunction(async (_event: H3Event): Promise<Schedule> => {
   const data = await jolpica<RawRaceTable>('current')
   return {
     season: data.RaceTable.season,
@@ -355,8 +382,7 @@ export const getSchedule = defineCachedFunction(async (_event: H3Event): Promise
   name: 'schedule',
   getKey: () => 'current',
   maxAge: 60 * 60,
-  swr: true,
-  validate: freshWithin(MAX_STALE),
+  maxStale: MAX_STALE,
 })
 
 /**
@@ -421,13 +447,12 @@ async function fetchStandings(_event: H3Event, season: string): Promise<SeasonSt
   }
 }
 
-const getCurrentStandings = defineCachedFunction(fetchStandings, {
+const getCurrentStandings = defineLiveCachedFunction(fetchStandings, {
   group: CACHE_GROUP,
   name: 'standings',
   getKey: (_event: H3Event, season: string) => season,
   maxAge: 60 * 10,
-  swr: true,
-  validate: freshWithin(MAX_STALE),
+  maxStale: MAX_STALE,
 })
 
 /** Une saison terminée ne bouge plus */
@@ -524,13 +549,12 @@ async function fetchRaceDetail(event: H3Event, round: number): Promise<RaceDetai
  */
 const SETTLED_AFTER = 3 * 24 * 60 * 60 * 1000
 
-const getLiveRaceDetail = defineCachedFunction(fetchRaceDetail, {
+const getLiveRaceDetail = defineLiveCachedFunction(fetchRaceDetail, {
   group: CACHE_GROUP,
   name: 'race-detail',
   getKey: (_event: H3Event, round: number) => String(round),
   maxAge: 60 * 10,
-  swr: true,
-  validate: freshWithin(MAX_STALE),
+  maxStale: MAX_STALE,
 })
 
 const getSettledRaceDetail = defineCachedFunction(fetchRaceDetail, {

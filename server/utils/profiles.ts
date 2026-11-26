@@ -34,6 +34,19 @@ const FIRST_SPRINT_SEASON = 2021
 
 const DAY = 24 * 60 * 60
 
+/**
+ * `Promise.all` qui laisse chaque appel aller au bout avant d'échouer : ceux qui
+ * réussissent ont le temps d'entrer en cache. Avec `Promise.all`, la réponse partait
+ * au premier échec et le Worker abandonnait les appels encore en file.
+ */
+async function allSettledOrThrow<T extends readonly unknown[] | []>(promises: T): Promise<{ -readonly [K in keyof T]: Awaited<T[K]> }> {
+  const results = await Promise.allSettled(promises as readonly unknown[])
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+  if (failure)
+    throw failure.reason
+  return results.map(result => (result as PromiseFulfilledResult<unknown>).value) as { -readonly [K in keyof T]: Awaited<T[K]> }
+}
+
 // --- Palmarès ---
 
 interface Champions {
@@ -42,17 +55,21 @@ interface Champions {
 }
 
 /** Champions par saison : le palmarès figé, complété par les saisons terminées depuis. */
-const getChampions = defineCachedFunction(async (event: H3Event): Promise<Champions> => {
+const getChampions = defineLiveCachedFunction(async (event: H3Event): Promise<Champions> => {
   const schedule = await getSchedule(event)
   const current = Number(schedule.season)
+  const finalRace = schedule.races.at(-1)
   const champions = { drivers: { ...DRIVER_CHAMPIONS }, constructors: { ...CONSTRUCTOR_CHAMPIONS } }
 
   for (let season = LAST_KNOWN_CHAMPIONS_SEASON + 1; season <= current; season++) {
+    // Toutes les fiches dépendent du palmarès : pas d'appel inutile avant la dernière course
+    if (season === current && (!finalRace || Date.parse(finalRace.at) > Date.now()))
+      continue
     const [drivers, constructors] = await Promise.all([
       jolpica<RawStandingsTable<RawDriverStandingsList>>(`${season}/driverstandings/1`),
       jolpica<RawStandingsTable<RawConstructorStandingsList>>(`${season}/constructorstandings/1`),
     ])
-    // Pas de champion tant que la saison en cours n'est pas allée au bout
+    // Jolpica publie souvent la dernière manche avec un jour de retard
     if (season === current && Number(drivers.StandingsTable.round) < schedule.races.length)
       continue
     const driver = drivers.StandingsTable.StandingsLists[0]?.DriverStandings[0]
@@ -68,8 +85,7 @@ const getChampions = defineCachedFunction(async (event: H3Event): Promise<Champi
   name: 'champions',
   getKey: () => 'all',
   maxAge: 6 * 60 * 60,
-  swr: true,
-  validate: freshWithin(DAY * 1000),
+  maxStale: DAY * 1000,
 })
 
 function titlesOf(champions: Record<string, string>, id: string) {
@@ -95,12 +111,15 @@ function httpsUrl(url: string | undefined) {
   }
 }
 
-function finishedWithin(result: RawResult, max: number) {
+/** Les champs d'un résultat utiles aux compteurs */
+type CountedResult = Pick<RawResult, 'positionText' | 'grid' | 'FastestLap'>
+
+function finishedWithin(result: CountedResult, max: number) {
   return /^\d+$/.test(result.positionText) && Number(result.positionText) <= max
 }
 
 /** Compteurs en Grand Prix ; pour une écurie, chaque voiture compte. */
-function countStats(races: RawRace[]): RaceStats {
+function countStats(races: { Results?: CountedResult[] }[]): RaceStats {
   const results = races.flatMap(race => race.Results ?? [])
   return {
     races: races.length,
@@ -186,22 +205,50 @@ async function driverPosition(event: H3Event, id: string, season: string, curren
   return standings.drivers.items.find(item => item.driver.id === id)?.position ?? null
 }
 
-async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCareer | null> {
-  const [info, races, champions, schedule] = await Promise.all([
+/**
+ * Identité et résultats d'un pilote (jusqu'à cinq appels), en cache à part pour qu'un
+ * échec sur les places au championnat ne les fasse pas redemander (voir les écuries).
+ * Seuls les champs utiles aux compteurs sont gardés : Hamilton compte 380 courses.
+ */
+const getDriverResults = defineLiveCachedFunction(async (_event: H3Event, id: string) => {
+  const [info, races] = await Promise.all([
     jolpica<{ DriverTable: { Drivers: RawDriver[] } }>(`drivers/${id}`),
     jolpicaRaces(`drivers/${id}/results`),
+  ])
+  return {
+    raw: info.DriverTable.Drivers[0] ?? null,
+    races: races.map(race => ({
+      season: race.season,
+      Results: (race.Results ?? []).map(({ positionText, grid, FastestLap, Constructor }) => ({
+        positionText,
+        grid,
+        FastestLap: FastestLap && { rank: FastestLap.rank },
+        Constructor,
+      })),
+    })),
+  }
+}, {
+  group: CACHE_GROUP,
+  name: 'driver-results',
+  getKey: (_event: H3Event, id: string) => id,
+  maxAge: 60 * 60,
+  maxStale: 60 * 60 * 1000,
+})
+
+async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCareer | null> {
+  const [{ raw, races }, champions, schedule] = await Promise.all([
+    getDriverResults(event, id),
     getChampions(event),
     getSchedule(event),
   ])
-  const raw = info.DriverTable.Drivers[0]
   if (!raw)
     return null
 
-  const bySeason = new Map<string, RawRace[]>()
+  const bySeason = new Map<string, typeof races>()
   for (const race of races)
     bySeason.set(race.season, [...bySeason.get(race.season) ?? [], race])
 
-  const seasons = await Promise.all([...bySeason].map(async ([season, seasonRaces]): Promise<DriverSeasonSummary> => {
+  const seasons = await allSettledOrThrow([...bySeason].map(async ([season, seasonRaces]): Promise<DriverSeasonSummary> => {
     const results = seasonRaces.flatMap(race => race.Results ?? [])
     const constructors = new Map(results.map(r => [r.Constructor.constructorId, toConstructor(r.Constructor)]))
     const finishes = results.filter(r => /^\d+$/.test(r.positionText)).map(r => Number(r.positionText))
@@ -224,13 +271,12 @@ async function fetchDriverCareer(event: H3Event, id: string): Promise<DriverCare
   }
 }
 
-export const getDriverCareer = defineCachedFunction(fetchDriverCareer, {
+export const getDriverCareer = defineLiveCachedFunction(fetchDriverCareer, {
   group: CACHE_GROUP,
   name: 'driver-career',
   getKey: (_event: H3Event, id: string) => id,
   maxAge: 6 * 60 * 60,
-  swr: true,
-  validate: freshWithin(DAY * 1000),
+  maxStale: DAY * 1000,
 })
 
 async function fetchDriverSeason(event: H3Event, id: string, season: string): Promise<DriverSeason | null> {
@@ -256,39 +302,77 @@ async function fetchDriverSeason(event: H3Event, id: string, season: string): Pr
 
 // --- Écuries ---
 
-async function fetchConstructorCareer(event: H3Event, id: string): Promise<ConstructorCareer | null> {
-  const base = `constructors/${id}`
-  // Une écurie compte des milliers de résultats (2 300 pour Ferrari) : on lit les compteurs
-  const [info, races, wins, seconds, thirds, poles, fastestLaps, seasons, champions] = await Promise.all([
-    jolpica<{ ConstructorTable: { Constructors: RawConstructor[] } }>(base),
-    jolpicaCount(`${base}/races`),
-    jolpicaCount(`${base}/results/1`),
-    jolpicaCount(`${base}/results/2`),
-    jolpicaCount(`${base}/results/3`),
-    jolpicaCount(`${base}/grid/1/results`),
-    jolpicaCount(`${base}/fastest/1/results`),
-    jolpica<{ SeasonTable: { Seasons: { season: string }[] } }>(`${base}/seasons`),
-    getChampions(event),
+/*
+ * Une fiche écurie coûte huit appels Jolpica. Quand Jolpica limite le débit (voir
+ * `jolpica.ts`), il suffisait qu'un seul échoue pour tout perdre et tout redemander
+ * à la visite suivante. Chaque morceau a donc son propre cache : la fiche se complète
+ * au fil des visites. Sans période stale (`maxStale` = `maxAge`) pour que la fiche,
+ * elle-même en cache, ne cumule pas deux retards ; un morceau n'est resservi périmé
+ * que si Jolpica refuse.
+ */
+
+/** Une écurie compte des milliers de résultats (2 300 pour Ferrari) : on lit les compteurs */
+const getConstructorCount = defineLiveCachedFunction(
+  (_event: H3Event, path: string) => jolpicaCount(path),
+  {
+    group: CACHE_GROUP,
+    name: 'constructor-count',
+    getKey: (_event: H3Event, path: string) => path,
+    maxAge: 60 * 60,
+    maxStale: 60 * 60 * 1000,
+  },
+)
+
+/** Fiche d'identité et saisons disputées : ne bougent qu'une fois par an. */
+const getConstructorInfo = defineLiveCachedFunction(async (_event: H3Event, id: string) => {
+  const [info, seasons] = await Promise.all([
+    jolpica<{ ConstructorTable: { Constructors: RawConstructor[] } }>(`constructors/${id}`),
+    jolpica<{ SeasonTable: { Seasons: { season: string }[] } }>(`constructors/${id}/seasons`),
   ])
   const raw = info.ConstructorTable.Constructors[0]
   if (!raw)
     return null
-
   return {
     constructor: { ...toConstructor(raw), url: httpsUrl(raw.url) },
+    seasons: seasons.SeasonTable.Seasons.map(s => s.season).sort().reverse(),
+  }
+}, {
+  group: CACHE_GROUP,
+  name: 'constructor-info',
+  getKey: (_event: H3Event, id: string) => id,
+  maxAge: DAY,
+  maxStale: DAY * 1000,
+})
+
+async function fetchConstructorCareer(event: H3Event, id: string): Promise<ConstructorCareer | null> {
+  const count = (path: string) => getConstructorCount(event, `constructors/${id}/${path}`)
+  const [info, races, wins, seconds, thirds, poles, fastestLaps, champions] = await allSettledOrThrow([
+    getConstructorInfo(event, id),
+    count('races'),
+    count('results/1'),
+    count('results/2'),
+    count('results/3'),
+    count('grid/1/results'),
+    count('fastest/1/results'),
+    getChampions(event),
+  ])
+  if (!info)
+    return null
+
+  return {
+    constructor: info.constructor,
     stats: { races, wins, podiums: wins + seconds + thirds, poles, fastestLaps },
     titles: titlesOf(champions.constructors, id),
-    seasons: seasons.SeasonTable.Seasons.map(s => s.season).sort().reverse(),
+    seasons: info.seasons,
   }
 }
 
-export const getConstructorCareer = defineCachedFunction(fetchConstructorCareer, {
+export const getConstructorCareer = defineLiveCachedFunction(fetchConstructorCareer, {
   group: CACHE_GROUP,
   name: 'constructor-career',
   getKey: (_event: H3Event, id: string) => id,
   maxAge: 6 * 60 * 60,
-  swr: true,
-  validate: freshWithin(DAY * 1000),
+  maxStale: DAY * 1000,
 })
 
 async function fetchConstructorSeason(event: H3Event, id: string, season: string): Promise<ConstructorSeason | null> {
@@ -322,13 +406,12 @@ async function fetchConstructorSeason(event: H3Event, id: string, season: string
 
 // --- Saisons : figées une fois passées, rafraîchies comme le classement sinon ---
 
-const getLiveDriverSeason = defineCachedFunction(fetchDriverSeason, {
+const getLiveDriverSeason = defineLiveCachedFunction(fetchDriverSeason, {
   group: CACHE_GROUP,
   name: 'driver-season',
   getKey: (_event: H3Event, id: string, season: string) => `${id}/${season}`,
   maxAge: 60 * 10,
-  swr: true,
-  validate: freshWithin(MAX_STALE),
+  maxStale: MAX_STALE,
 })
 
 const getPastDriverSeason = defineCachedFunction(fetchDriverSeason, {
@@ -339,13 +422,12 @@ const getPastDriverSeason = defineCachedFunction(fetchDriverSeason, {
   swr: true,
 })
 
-const getLiveConstructorSeason = defineCachedFunction(fetchConstructorSeason, {
+const getLiveConstructorSeason = defineLiveCachedFunction(fetchConstructorSeason, {
   group: CACHE_GROUP,
   name: 'constructor-season',
   getKey: (_event: H3Event, id: string, season: string) => `${id}/${season}`,
   maxAge: 60 * 10,
-  swr: true,
-  validate: freshWithin(MAX_STALE),
+  maxStale: MAX_STALE,
 })
 
 const getPastConstructorSeason = defineCachedFunction(fetchConstructorSeason, {
