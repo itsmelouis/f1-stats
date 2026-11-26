@@ -151,10 +151,18 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
 /** Jolpica renvoie au plus 100 lignes par page */
 const PAGE_SIZE = 100
 
+/**
+ * Jolpica exige un User-Agent propre à l'application et bloque (403) depuis
+ * le 21 août 2026 les valeurs par défaut : `node` en dev, vide dans un Worker.
+ * https://github.com/jolpica/jolpica-f1/discussions/386
+ */
+const USER_AGENT = 'f1-stats (+https://f1.itslouis.dev)'
+
 export async function jolpica<T>(path: string, query: { limit?: number, offset?: number } = {}, attempt = 0): Promise<T> {
   try {
     const data = await withSlot(() => $fetch<{ MRData: T }>(`${BASE_URL}/${path}.json`, {
       query: { limit: PAGE_SIZE, ...query },
+      headers: { 'User-Agent': USER_AGENT },
       retry: 0,
     }))
     return data.MRData
